@@ -1,11 +1,11 @@
 //! Power mode helper - combines display toggling with CPU frequency changes
 
 use crate::hardware::{backlight, drm_panel, framebuffer};
-use crate::logger::Logger;
-use crate::{WifiConfig, cpu::CpuFreqConfig};
+use crate::{CpuFreqConfig, WifiConfig};
+use log::{debug, info, warn};
 use std::fs;
 
-fn toggle_display(logger: &Logger, dry_run: bool) -> Result<(), String> {
+fn toggle_display(dry_run: bool) -> Result<(), String> {
     let backlight_path = match backlight::find_backlight() {
         Ok(Some(p)) => p,
         Ok(None) => return Err("backlight not found".to_string()),
@@ -21,7 +21,7 @@ fn toggle_display(logger: &Logger, dry_run: bool) -> Result<(), String> {
 
     if bl_state_trim == "4" {
         // ON
-        logger.info("Turning display ON");
+        info!("Turning display ON");
         if !dry_run {
             if let Some(fb) = framebuffer_path {
                 let _ = fs::write(fb.join("blank"), "0");
@@ -31,11 +31,11 @@ fn toggle_display(logger: &Logger, dry_run: bool) -> Result<(), String> {
                 let _ = fs::write(drm.join("status"), "detect");
             }
         } else {
-            logger.debug("DRY-RUN: toggle_display ON skipped");
+            debug!("DRY-RUN: toggle_display ON skipped");
         }
     } else {
         // OFF
-        logger.info("Turning display OFF");
+        info!("Turning display OFF");
         if !dry_run {
             if let Some(drm) = drm_path {
                 let _ = fs::write(drm.join("status"), "off");
@@ -45,7 +45,7 @@ fn toggle_display(logger: &Logger, dry_run: bool) -> Result<(), String> {
             }
             let _ = fs::write(backlight_path.join("bl_power"), "4");
         } else {
-            logger.debug("DRY-RUN: toggle_display OFF skipped");
+            debug!("DRY-RUN: toggle_display OFF skipped");
         }
     }
     Ok(())
@@ -58,43 +58,32 @@ pub enum PowerMode {
     Saving,
 }
 
-pub fn enter_saving_mode(
-    cpu_config: &CpuFreqConfig,
-    logger: &Logger,
-    dry_run: bool,
-    wifi: Option<&WifiConfig>,
-) {
-    logger.info("Entering power-saving mode");
-    if let Err(e) = toggle_display(logger, dry_run) {
-        logger.warn(&format!("toggle_display failed: {}", e));
+pub fn enter_saving_mode(cpu_config: &CpuFreqConfig, dry_run: bool, wifi: Option<&WifiConfig>) {
+    info!("Entering power-saving mode");
+    if let Err(e) = toggle_display(dry_run) {
+        warn!("toggle_display failed: {}", e);
     }
-    cpu_config.apply_saving_mode(logger, dry_run);
+    cpu_config.apply_saving_mode(dry_run);
     if let Some(w) = wifi {
-        w.block(logger, dry_run);
+        w.block(dry_run);
     }
 }
 
 /// Exit power-saving mode: restore CPU then turn display on
-pub fn exit_saving_mode(
-    cpu_config: &CpuFreqConfig,
-    logger: &Logger,
-    dry_run: bool,
-    wifi: Option<&WifiConfig>,
-) {
-    logger.info("Exiting power-saving mode");
-    cpu_config.apply_normal_mode(logger, dry_run);
-    if let Err(e) = toggle_display(logger, dry_run) {
-        logger.warn(&format!("toggle_display failed: {}", e));
+pub fn exit_saving_mode(cpu_config: &CpuFreqConfig, dry_run: bool, wifi: Option<&WifiConfig>) {
+    info!("Exiting power-saving mode");
+    cpu_config.apply_normal_mode(dry_run);
+    if let Err(e) = toggle_display(dry_run) {
+        warn!("toggle_display failed: {}", e);
     }
     if let Some(w) = wifi {
-        w.unblock(logger, dry_run);
+        w.unblock(dry_run);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::logger::Logger;
     use std::env;
     use std::fs;
 
@@ -109,19 +98,17 @@ mod tests {
         ));
         let _ = fs::create_dir_all(&tmp);
         let cpu = CpuFreqConfig::with_policy_path(tmp.clone(), Some(String::from("100,200")));
-        let logger = Logger::new(false);
-
         // Dry run should not create policy files
-        enter_saving_mode(&cpu, &logger, true, None);
+        enter_saving_mode(&cpu, true, None);
         assert!(!tmp.join("scaling_min_freq").exists());
         assert!(!tmp.join("scaling_max_freq").exists());
 
         // Non-dry-run should write
-        enter_saving_mode(&cpu, &logger, false, None);
+        enter_saving_mode(&cpu, false, None);
         assert!(tmp.join("scaling_min_freq").exists());
         assert!(tmp.join("scaling_max_freq").exists());
 
         // exit - verify it doesn't panic
-        exit_saving_mode(&cpu, &logger, false, None);
+        exit_saving_mode(&cpu, false, None);
     }
 }

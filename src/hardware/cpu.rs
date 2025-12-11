@@ -1,6 +1,7 @@
 //! CPU frequency handling under `hardware` namespace
-use crate::logger::Logger;
 use std::path::PathBuf;
+
+use log::debug;
 
 pub const CPU_POLICY_PATH: &str = "/sys/devices/system/cpu/cpufreq/policy0";
 
@@ -50,37 +51,37 @@ impl CpuFreqConfig {
         }
     }
 
-    pub fn apply_saving_mode(&self, logger: &Logger, dry_run: bool) {
+    pub fn apply_saving_mode(&self, dry_run: bool) {
         if let (Some(min), Some(max)) = (&self.saving_min, &self.saving_max) {
             if dry_run {
-                logger.debug(&format!(
+                debug!(
                     "DRY-RUN: Would write CPU saving mode {}/{} to {}",
                     min,
                     max,
                     self.policy_path.display()
-                ));
+                );
             } else {
                 let _ = std::fs::write(self.policy_path.join("scaling_min_freq"), min);
                 let _ = std::fs::write(self.policy_path.join("scaling_max_freq"), max);
             }
-            logger.debug(&format!("CPU: saving mode {}/{}", min, max));
+            debug!("CPU: saving mode {}/{}", min, max);
         }
     }
 
-    pub fn apply_normal_mode(&self, logger: &Logger, dry_run: bool) {
+    pub fn apply_normal_mode(&self, dry_run: bool) {
         if let (Some(min), Some(max)) = (&self.default_min, &self.default_max) {
             if dry_run {
-                logger.debug(&format!(
+                debug!(
                     "DRY-RUN: Would write CPU normal mode {}/{} to {}",
                     min.trim(),
                     max.trim(),
                     self.policy_path.display()
-                ));
+                );
             } else {
                 let _ = std::fs::write(self.policy_path.join("scaling_min_freq"), min.trim());
                 let _ = std::fs::write(self.policy_path.join("scaling_max_freq"), max.trim());
             }
-            logger.debug(&format!("CPU: normal mode {}/{}", min.trim(), max.trim()));
+            debug!("CPU: normal mode {}/{}", min.trim(), max.trim());
         }
     }
 }
@@ -88,7 +89,6 @@ impl CpuFreqConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::logger::Logger;
     use std::env;
     use std::fs;
 
@@ -104,14 +104,13 @@ mod tests {
         let _ = fs::create_dir_all(&tmp);
 
         let cpu = CpuFreqConfig::with_policy_path(tmp.clone(), Some(String::from("100,400")));
-        let logger = Logger::new(false);
-        cpu.apply_saving_mode(&logger, false);
+        cpu.apply_saving_mode(false);
         let min = fs::read_to_string(tmp.join("scaling_min_freq")).unwrap();
         let max = fs::read_to_string(tmp.join("scaling_max_freq")).unwrap();
         assert_eq!(min, "100000");
         assert_eq!(max, "400000");
 
-        cpu.apply_normal_mode(&logger, false);
+        cpu.apply_normal_mode(false);
         let min2 = fs::read_to_string(tmp.join("scaling_min_freq")).unwrap();
         let max2 = fs::read_to_string(tmp.join("scaling_max_freq")).unwrap();
         assert_eq!(min2.trim(), "100000");

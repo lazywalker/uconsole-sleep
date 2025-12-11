@@ -1,9 +1,10 @@
 //! Wifi (rfkill) helpers
-use crate::logger::Logger;
 use std::{
     fs,
     path::{Path, PathBuf},
 };
+
+use log::{debug, warn};
 
 pub const RFKILL_PATH: &str = "/sys/class/rfkill/rfkill0";
 
@@ -11,22 +12,22 @@ pub fn rfkill_state_path(path: &std::path::Path) -> PathBuf {
     path.join("state")
 }
 
-pub fn write_rfkill_state(logger: &Logger, path: &Path, block: bool, dry_run: bool) {
+pub fn write_rfkill_state(path: &Path, block: bool, dry_run: bool) {
     let state = rfkill_state_path(path);
     if dry_run {
-        logger.debug(&format!(
+        debug!(
             "DRY-RUN: would write '{}' to {}",
             if block { "0" } else { "1" },
             state.display()
-        ));
+        );
         return;
     }
     let _ = std::fs::write(&state, if block { "0" } else { "1" });
-    logger.debug(&format!(
+    debug!(
         "WiFi: {} via {}",
         if block { "blocked" } else { "unblocked" },
         state.display()
-    ));
+    );
 }
 
 pub fn find_default_rfkill_path() -> Option<PathBuf> {
@@ -54,37 +55,37 @@ impl WifiConfig {
         }
     }
 
-    pub fn block(&self, logger: &Logger, dry_run: bool) {
+    pub fn block(&self, dry_run: bool) {
         if !self.enabled {
             return;
         }
         if let Some(path) = &self.rfkill_path {
             let state = path.join("state");
             if dry_run {
-                logger.debug(&format!("DRY-RUN: would write '1' to {}", state.display()));
+                debug!("DRY-RUN: would write '1' to {}", state.display());
                 return;
             }
             let _ = fs::write(&state, "1");
-            logger.debug(&format!("WiFi: blocked via {}", state.display()));
+            debug!("WiFi: blocked via {}", state.display());
         } else {
-            logger.warn("WiFi toggling enabled but no rfkill path provided");
+            warn!("WiFi toggling enabled but no rfkill path provided");
         }
     }
 
-    pub fn unblock(&self, logger: &Logger, dry_run: bool) {
+    pub fn unblock(&self, dry_run: bool) {
         if !self.enabled {
             return;
         }
         if let Some(path) = &self.rfkill_path {
             let state = path.join("state");
             if dry_run {
-                logger.debug(&format!("DRY-RUN: would write '0' to {}", state.display()));
+                debug!("DRY-RUN: would write '0' to {}", state.display());
                 return;
             }
             let _ = fs::write(&state, "0");
-            logger.debug(&format!("WiFi: unblocked via {}", state.display()));
+            debug!("WiFi: unblocked via {}", state.display());
         } else {
-            logger.warn("WiFi toggling enabled but no rfkill path provided");
+            warn!("WiFi toggling enabled but no rfkill path provided");
         }
     }
 }
@@ -92,7 +93,6 @@ impl WifiConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::logger::Logger;
     use std::env;
     use std::fs;
 
@@ -112,8 +112,7 @@ mod tests {
         ));
         let _ = fs::create_dir_all(&tmp);
         fs::write(tmp.join("state"), "0").unwrap();
-        let logger = Logger::new(false);
-        write_rfkill_state(&logger, &tmp, true, true);
+        write_rfkill_state(&tmp, true, true);
         // dry run should not change
         let s = fs::read_to_string(tmp.join("state")).unwrap();
         assert_eq!(s, "0");

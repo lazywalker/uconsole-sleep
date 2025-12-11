@@ -40,12 +40,12 @@ sudo ./target/release/uconsole-sleep
 default `/etc/uconsole-sleep/config` or repo `./etc/uconsole-sleep/config.default`
 
 sudo ./target/release/uconsole-sleep --config /path/to/config
- - `--debug` or `-v`: enable debug logging
+ - Use `RUST_LOG` environment variable to control logging level (e.g. `RUST_LOG=debug`).
 
 Examples:
 ```bash
-# Dry run (no writes), enable debug logging
-sudo ./target/release/uconsole-sleep --dry-run --debug
+# Dry run (no writes)
+sudo ./target/release/uconsole-sleep --dry-run
 
 ```
 

@@ -13,7 +13,6 @@ use crate::wifi;
 #[derive(Clone, Debug, Default)]
 pub struct Config {
     pub dry_run: bool,
-    pub debug: bool,
     pub policy_path: Option<PathBuf>,
     pub saving_cpu_freq: Option<String>,
     pub hold_trigger_sec: Option<f32>,
@@ -54,9 +53,6 @@ impl Config {
         if let Ok(v) = std::env::var("DRY_RUN") {
             cfg.dry_run = parse_bool(&v);
         }
-        if let Ok(v) = std::env::var("DEBUG") {
-            cfg.debug = parse_bool(&v);
-        }
         if let Ok(v) = std::env::var("POLICY_PATH") {
             cfg.policy_path = Some(PathBuf::from(v));
         }
@@ -86,9 +82,6 @@ impl Config {
             let map = parse_value_map(&content);
             if let Some(v) = map.get("DRY_RUN") {
                 cfg.dry_run = parse_bool(v);
-            }
-            if let Some(v) = map.get("DEBUG") {
-                cfg.debug = parse_bool(v);
             }
             if let Some(v) = map.get("POLICY_PATH") {
                 cfg.policy_path = Some(PathBuf::from(v));
