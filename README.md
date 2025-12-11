@@ -1,5 +1,16 @@
 # uconsole-sleep
 
+<!-- Repository badges -->
+[![Rust](https://img.shields.io/badge/rust-2024--edition-orange)](https://www.rust-lang.org/)
+[![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](https://opensource.org/licenses/GPL-3.0)
+[![CI](https://github.com/lazywalker/uconsole-sleep/actions/workflows/ci.yml/badge.svg)](https://github.com/lazywalker/uconsole-sleep/actions)
+[![crates.io](https://img.shields.io/crates/v/uconsole-sleep.svg)](https://crates.io/crates/uconsole-sleep)
+[![docs.rs](https://docs.rs/uconsole-sleep/badge.svg)](https://docs.rs/uconsole-sleep)
+[![codecov](https://codecov.io/gh/lazywalker/uconsole-sleep/branch/master/graph/badge.svg)](https://codecov.io/gh/lazywalker/uconsole-sleep)
+[![Dependabot](https://img.shields.io/badge/Dependabot-enabled-brightgreen.svg)](https://github.com/lazywalker/uconsole-sleep/network/updates)
+[![Maintenance](https://img.shields.io/maintenance/yes/2025)](https://github.com/lazywalker/uconsole-sleep)
+
+
 This is a Rust port of [uConsole-sleep](https://github.com/qkdxorjs1002/uConsole-sleep). It provides a power key monitor that toggles between normal and power-saving modes. Passed tests on uConsole cm4 with RPI Trixie OS.
 
 Binary:
