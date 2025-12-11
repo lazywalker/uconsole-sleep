@@ -1,6 +1,6 @@
 [package]
 name = "uconsole-sleep"
-version = "0.1.0"
+version = "0.1.2"
 edition = "2024"
 authors = ["lazywalker"]
 description = "uConsole sleep service "
@@ -24,13 +24,12 @@ license-file = ["LICENSE"]
 extended-description = """\
 Monitor the power key and toggle power-saving mode on short press.
 """
-depends = "$auto"
-section = "utility"
+section = "utils"
 priority = "optional"
 assets = [
 	# `target/release` path is special and will be replaced by cargo-deb at build time
 	["target/release/uconsole-sleep", "usr/bin/", "755"],
 	["etc/uconsole-sleep/config.default", "etc/uconsole-sleep/config", "644"],
 ]
-maintainer-scripts = "systemd/"
+maintainer-scripts = "etc/systemd/"
 systemd-units = { enable = true }
