@@ -24,7 +24,10 @@ Usage (run as root to write sysfs, grab input device, and manage power):
 sudo ./target/release/uconsole-sleep
 ```
 
-# To override the configuration location (default `/etc/uconsole-sleep/config` or repo `./etc/uconsole-sleep/config.default`)
+# To override the configuration location
+
+default `/etc/uconsole-sleep/config` or repo `./etc/uconsole-sleep/config.default`
+
 sudo ./target/release/uconsole-sleep --config /path/to/config
  - `--debug` or `-v`: enable debug logging
 
