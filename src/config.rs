@@ -9,6 +9,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use crate::wifi;
+use log::Level;
 
 #[derive(Clone, Debug, Default)]
 pub struct Config {
@@ -18,6 +19,7 @@ pub struct Config {
     pub hold_trigger_sec: Option<f32>,
     pub toggle_wifi: bool,
     pub wifi_rfkill_path: Option<PathBuf>,
+    pub log_level: Option<Level>,
 }
 
 // Default impl derived via #[derive(Default)]
@@ -68,6 +70,11 @@ impl Config {
         if let Ok(v) = std::env::var("WIFI_RFKILL") {
             cfg.wifi_rfkill_path = Some(PathBuf::from(v));
         }
+        if let Ok(v) = std::env::var("LOG_LEVEL")
+            && let Ok(l) = v.parse::<log::Level>()
+        {
+            cfg.log_level = Some(l);
+        }
 
         // Determine config file path
         let cfg_path = if let Some(p) = path {
@@ -97,6 +104,11 @@ impl Config {
             }
             if let Some(v) = map.get("WIFI_RFKILL") {
                 cfg.wifi_rfkill_path = Some(PathBuf::from(v));
+            }
+            if let Some(v) = map.get("LOG_LEVEL")
+                && let Ok(l) = v.parse::<log::Level>()
+            {
+                cfg.log_level = Some(l);
             }
         }
 
@@ -150,4 +162,22 @@ mod tests {
             PathBuf::from(wifi::RFKILL_PATH)
         );
     }
+
+    #[test]
+    fn test_log_level_from_file() {
+        let tmp = env::temp_dir().join(format!(
+            "uconsole_cfg_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis()
+        ));
+        let _ = fs::create_dir_all(&tmp);
+        let cfg_file = tmp.join("cfg_log");
+        fs::write(&cfg_file, "LOG_LEVEL=debug\n").unwrap();
+        let cfg = Config::load(Some(cfg_file.clone()));
+        assert_eq!(cfg.log_level, Some(log::Level::Debug));
+    }
+
+    // env var override test removed due to global env mutation in tests
 }

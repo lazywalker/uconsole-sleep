@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 
 use nix::sys::epoll::{Epoll, EpollCreateFlags, EpollEvent, EpollFlags};
 
-use log::{debug, error, info, warn};
+use log::{Level, LevelFilter, debug, error, info, warn};
 use uconsole_sleep::hardware::power_key;
 
 use uconsole_sleep::CpuFreqConfig;
@@ -28,6 +28,26 @@ const EVIOCGRAB: u64 = 0x40044590;
 
 // Use PowerMode and enter/exit functions from the library `power_mode` module.
 
+fn resolve_log_level(
+    rust_log_env: Option<String>,
+    verbosity: u8,
+    cfg_level: Option<Level>,
+) -> Option<LevelFilter> {
+    // RUST_LOG present and non-empty has highest priority (return None to indicate env value should be used)
+    if let Some(ref s) = rust_log_env
+        && !s.trim().is_empty()
+    {
+        return None;
+    }
+    // CLI verbosity next
+    match verbosity {
+        1 => Some(LevelFilter::Info),
+        2 => Some(LevelFilter::Debug),
+        3 => Some(LevelFilter::Trace),
+        _ => cfg_level.map(|l| l.to_level_filter()),
+    }
+}
+
 fn main() {
     // parse basic CLI flags
     let (dry_run, verbosity, toggle_wifi_flag, cli_config_path) = parse_cli_args();
@@ -35,22 +55,17 @@ fn main() {
     // Read configuration (env vars + config file)
     let cfg = Config::load(cli_config_path.clone());
 
-    // Initialize env_logger; respect RUST_LOG unless overridden by verbosity CLI flags
+    // Initialize env_logger; precedence: RUST_LOG (env) > CLI verbosity (-v) > config.log_level
     let mut builder = env_logger::builder();
-    match verbosity {
-        1 => {
-            builder.filter_level(log::LevelFilter::Info);
-        }
-        2 => {
-            builder.filter_level(log::LevelFilter::Debug);
-        }
-        3 => {
-            builder.filter_level(log::LevelFilter::Trace);
-        }
-        _ => {
-            builder.parse_filters(&std::env::var("RUST_LOG").unwrap_or_default());
-        }
-    };
+    let rust_log_env = std::env::var("RUST_LOG").ok();
+    let resolved = resolve_log_level(rust_log_env.clone(), verbosity, cfg.log_level);
+    if let Some(ref rust_val) = rust_log_env
+        && !rust_val.trim().is_empty()
+    {
+        builder.parse_filters(rust_val);
+    } else if let Some(l) = resolved {
+        builder.filter_level(l);
+    }
     let _ = builder.try_init();
     info!("Starting sleep-remap-powerkey (power-saving mode toggle)");
 
@@ -96,40 +111,34 @@ fn main() {
     let cfg_policy_str = opt_to_str(&cfg.policy_path);
     let cfg_wifi_rfkill_str = opt_to_str(&cfg.wifi_rfkill_path);
 
-    // Log start-up parameters only when RUST_LOG indicates debug level. One parameter per line for readability.
-    if std::env::var("RUST_LOG")
-        .unwrap_or_default()
-        .contains("debug")
-    {
-        debug!("cli.dry_run={}", dry_run);
-        debug!("cli.policy_path={}", cli_policy_str);
-        debug!("cli.config_path={}", cli_config_str);
-        debug!("cli.toggle_wifi={:?}", toggle_wifi_flag);
-        debug!("cli.wifi_rfkill={}", wifi_rfkill_cli_str);
+    debug!("cli.dry_run={}", dry_run);
+    debug!("cli.policy_path={}", cli_policy_str);
+    debug!("cli.config_path={}", cli_config_str);
+    debug!("cli.toggle_wifi={:?}", toggle_wifi_flag);
+    debug!("cli.wifi_rfkill={}", wifi_rfkill_cli_str);
 
-        debug!("cfg.dry_run={}", cfg.dry_run);
-        debug!("cfg.policy_path={}", cfg_policy_str);
-        debug!("cfg.saving_cpu_freq={:?}", cfg.saving_cpu_freq);
-        debug!("cfg.hold_trigger_sec={:?}", cfg.hold_trigger_sec);
-        debug!("cfg.toggle_wifi={}", cfg.toggle_wifi);
-        debug!("cfg.wifi_rfkill={}", cfg_wifi_rfkill_str);
+    debug!("cfg.dry_run={}", cfg.dry_run);
+    debug!("cfg.policy_path={}", cfg_policy_str);
+    debug!("cfg.saving_cpu_freq={:?}", cfg.saving_cpu_freq);
+    debug!("cfg.hold_trigger_sec={:?}", cfg.hold_trigger_sec);
+    debug!("cfg.toggle_wifi={}", cfg.toggle_wifi);
+    debug!("cfg.wifi_rfkill={}", cfg_wifi_rfkill_str);
 
-        debug!("derived.hold_trigger_s={:.3}", hold_trigger.as_secs_f32());
-        debug!("derived.saving_cpu_freq={:?}", saving_cpu_freq);
-        debug!(
-            "derived.cpu_policy_path={}",
-            cpu_config.policy_path.display()
-        );
-        debug!("derived.cpu_saving_min={:?}", cpu_config.saving_min);
-        debug!("derived.cpu_saving_max={:?}", cpu_config.saving_max);
-        debug!("derived.cpu_default_min={:?}", cpu_config.default_min);
-        debug!("derived.cpu_default_max={:?}", cpu_config.default_max);
-        debug!("derived.final_toggle_wifi={}", final_toggle_wifi);
-        debug!(
-            "derived.final_wifi_rfkill={}",
-            opt_to_str(&final_wifi_rfkill)
-        );
-    }
+    debug!("derived.hold_trigger_s={:.3}", hold_trigger.as_secs_f32());
+    debug!("derived.saving_cpu_freq={:?}", saving_cpu_freq);
+    debug!(
+        "derived.cpu_policy_path={}",
+        cpu_config.policy_path.display()
+    );
+    debug!("derived.cpu_saving_min={:?}", cpu_config.saving_min);
+    debug!("derived.cpu_saving_max={:?}", cpu_config.saving_max);
+    debug!("derived.cpu_default_min={:?}", cpu_config.default_min);
+    debug!("derived.cpu_default_max={:?}", cpu_config.default_max);
+    debug!("derived.final_toggle_wifi={}", final_toggle_wifi);
+    debug!(
+        "derived.final_wifi_rfkill={}",
+        opt_to_str(&final_wifi_rfkill)
+    );
 
     let dev = match power_key::find_power_key() {
         Ok(Some(p)) => p,
@@ -266,5 +275,29 @@ fn main() {
                 sleep(Duration::from_millis(500));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use log::{Level, LevelFilter};
+
+    #[test]
+    fn resolve_prefers_rust_env() {
+        let resolved = resolve_log_level(Some("info".to_string()), 3, Some(Level::Debug));
+        assert_eq!(resolved, None);
+    }
+
+    #[test]
+    fn resolve_verbosity_over_config() {
+        let resolved = resolve_log_level(None, 1, Some(Level::Debug));
+        assert_eq!(resolved, Some(LevelFilter::Info));
+    }
+
+    #[test]
+    fn resolve_config_when_no_env_no_verbosity() {
+        let resolved = resolve_log_level(None, 0, Some(Level::Warn));
+        assert_eq!(resolved, Some(LevelFilter::Warn));
     }
 }
