@@ -1,0 +1,21 @@
+[Unit]
+Description=Sleep Remap Powerkey Service
+Documentation=man:systemd.unit(5)
+After=network.target
+
+[Service]
+Type=simple
+# Path to the installed binary; adjust if you install elsewhere
+ExecStart=/usr/bin/uconsole-sleep
+EnvironmentFile=/etc/uconsole-sleep/config
+Restart=on-failure
+RestartSec=5s
+# Run as root by default; change User= if you create a dedicated service user
+#User=root
+AmbientCapabilities=CAP_SYS_ADMIN
+
+[Install]
+WantedBy=multi-user.target
+[Unit]
+Description=Sleep Remap PowerKey
+After=basic.target
