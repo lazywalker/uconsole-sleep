@@ -1,0 +1,118 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "*"
+
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  deb:
+    name: Build Debian packages
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target: [aarch64-unknown-linux-gnu, armv7-unknown-linux-gnueabihf]
+      fail-fast: false
+
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Install base system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config curl ca-certificates git libssl-dev dpkg-dev
+
+      - name: Set up Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+
+      - name: Install cargo-deb
+        run: cargo install --locked cargo-deb
+
+      - name: Add Rust target
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Install cross toolchain for aarch64
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
+          echo "CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
+          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
+
+      - name: Install cross toolchain for armv7 (armhf)
+        if: matrix.target == 'armv7-unknown-linux-gnueabihf'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-arm-linux-gnueabihf binutils-arm-linux-gnueabihf
+          echo "CC_armv7_unknown_linux_gnueabihf=arm-linux-gnueabihf-gcc" >> $GITHUB_ENV
+          echo "CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER=arm-linux-gnueabihf-gcc" >> $GITHUB_ENV
+
+      - name: Build project and generate deb for target
+        env:
+          PREFIX: /usr/local
+        run: |
+          cargo deb --target ${{ matrix.target }} --no-default-features
+
+      - name: Find deb artifacts
+        run: |
+          echo 'Listing created .deb artifacts:'
+          find target -type f -name "*.deb" -print || true
+
+      - name: Get version
+        shell: bash
+        run: |
+          VERSION=$(grep '^version =' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+
+      - name: Upload built .deb artifacts
+        uses: actions/upload-artifact@v5
+        with:
+          name: rgrc-${{ env.VERSION }}-${{ matrix.target }}.deb
+          path: |
+            target/debian/*.deb
+  publish:
+    name: Publish release
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [deb]
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v6
+        with:
+          path: artifacts
+      - name: List artifacts
+        run: |
+          # List only release assets we intend to attach to the GitHub release
+          find artifacts -type f \( -name "*.zip" -o -name "*.tar.gz" -o -name "*.deb" \) | sort
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          # Support .zip, .tar.gz and .deb release artifacts
+          files: |
+            artifacts/**/*.{zip,tar.gz,deb}
+          generate_release_notes: true
+          draft: true
+  publish-crate:
+    name: Publish to crates.io
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    needs: publish
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+      - name: Publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_API_TOKEN }}
+        run: cargo publish
