@@ -16,6 +16,8 @@ strip = true
 [dependencies]
 nix = { version = "0.30", features = ["inotify", "event"] }
 libc = "0.2"
+log = "0.4"
+env_logger = { version = "0.10", default-features = false }
 
 [package.metadata.deb]
 maintainer = "lazywalker <lazywalkerz@gmail.com>"

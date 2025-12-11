@@ -14,12 +14,13 @@ use std::time::{Duration, Instant};
 
 use nix::sys::epoll::{Epoll, EpollCreateFlags, EpollEvent, EpollFlags};
 
+use log::{Level, LevelFilter, debug, error, info, warn};
 use uconsole_sleep::hardware::power_key;
-use uconsole_sleep::logger::Logger;
 
+use uconsole_sleep::CpuFreqConfig;
+use uconsole_sleep::WifiConfig;
+use uconsole_sleep::args::parse_cli_args;
 use uconsole_sleep::config::Config;
-use uconsole_sleep::cpu::CpuFreqConfig;
-use uconsole_sleep::hardware::wifi::WifiConfig;
 use uconsole_sleep::power_mode::{PowerMode, enter_saving_mode, exit_saving_mode};
 
 // EVIOCGRAB ioctl to grab exclusive access to input device
@@ -27,61 +28,46 @@ const EVIOCGRAB: u64 = 0x40044590;
 
 // Use PowerMode and enter/exit functions from the library `power_mode` module.
 
-/// Parse CLI args for a minimal set: --dry-run, --debug, --policy-path <path>, --config <path>
-fn parse_cli_args_from<I: IntoIterator<Item = String>>(
-    args: I,
-) -> (bool, bool, Option<bool>, Option<PathBuf>) {
-    let mut dry_run = false;
-    let mut debug = false;
-    let mut config_path: Option<PathBuf> = None;
-    let mut toggle_wifi: Option<bool> = None;
-    // --policy-path and --wifi-rfkill are deprecated; config will be used instead
-    let mut iter = args.into_iter();
-    while let Some(a) = iter.next() {
-        match a.as_str() {
-            "--dry-run" => dry_run = true,
-            "--debug" | "-v" | "--verbose" => debug = true,
-            s if s.starts_with("--toggle-wifi") => {
-                if s == "--toggle-wifi" {
-                    toggle_wifi = Some(true);
-                } else if let Some(eq) = s.find('=') {
-                    let val = s[eq + 1..].to_ascii_lowercase();
-                    toggle_wifi = Some(val == "true" || val == "1" || val == "yes");
-                }
-            }
-            s if s.starts_with("--config") => {
-                if s == "--config" {
-                    if let Some(p) = iter.next() {
-                        config_path = Some(PathBuf::from(p));
-                    }
-                } else if let Some(eq) = s.find('=') {
-                    let p = &s[eq + 1..];
-                    if !p.is_empty() {
-                        config_path = Some(PathBuf::from(p));
-                    }
-                }
-            }
-            _ => {}
-        }
+fn resolve_log_level(
+    rust_log_env: Option<String>,
+    verbosity: u8,
+    cfg_level: Option<Level>,
+) -> Option<LevelFilter> {
+    // RUST_LOG present and non-empty has highest priority (return None to indicate env value should be used)
+    if let Some(ref s) = rust_log_env
+        && !s.trim().is_empty()
+    {
+        return None;
     }
-    (dry_run, debug, toggle_wifi, config_path)
-}
-
-fn parse_cli_args() -> (bool, bool, Option<bool>, Option<PathBuf>) {
-    parse_cli_args_from(std::env::args())
+    // CLI verbosity next
+    match verbosity {
+        1 => Some(LevelFilter::Info),
+        2 => Some(LevelFilter::Debug),
+        3 => Some(LevelFilter::Trace),
+        _ => cfg_level.map(|l| l.to_level_filter()),
+    }
 }
 
 fn main() {
     // parse basic CLI flags
-    let (dry_run, cli_debug_flag, toggle_wifi_flag, cli_config_path) = parse_cli_args();
+    let (dry_run, verbosity, toggle_wifi_flag, cli_config_path) = parse_cli_args();
 
     // Read configuration (env vars + config file)
     let cfg = Config::load(cli_config_path.clone());
 
-    // Determine final debug flag: CLI flag takes precedence over config file
-    let final_debug_flag = cli_debug_flag || cfg.debug;
-    let logger = Logger::new(final_debug_flag);
-    logger.info("Starting sleep-remap-powerkey (power-saving mode toggle)");
+    // Initialize env_logger; precedence: RUST_LOG (env) > CLI verbosity (-v) > config.log_level
+    let mut builder = env_logger::builder();
+    let rust_log_env = std::env::var("RUST_LOG").ok();
+    let resolved = resolve_log_level(rust_log_env.clone(), verbosity, cfg.log_level);
+    if let Some(ref rust_val) = rust_log_env
+        && !rust_val.trim().is_empty()
+    {
+        builder.parse_filters(rust_val);
+    } else if let Some(l) = resolved {
+        builder.filter_level(l);
+    }
+    let _ = builder.try_init();
+    info!("Starting sleep-remap-powerkey (power-saving mode toggle)");
 
     let hold_trigger = Duration::from_secs_f32(
         cfg.hold_trigger_sec
@@ -125,73 +111,53 @@ fn main() {
     let cfg_policy_str = opt_to_str(&cfg.policy_path);
     let cfg_wifi_rfkill_str = opt_to_str(&cfg.wifi_rfkill_path);
 
-    // Log start-up parameters only when debug was requested. One parameter per line for readability.
-    if final_debug_flag {
-        logger.debug(&format!("cli.dry_run={}", dry_run));
-        logger.debug(&format!("cli.debug={}", cli_debug_flag));
-        logger.debug(&format!("cli.policy_path={}", cli_policy_str));
-        logger.debug(&format!("cli.config_path={}", cli_config_str));
-        logger.debug(&format!("cli.toggle_wifi={:?}", toggle_wifi_flag));
-        logger.debug(&format!("cli.wifi_rfkill={}", wifi_rfkill_cli_str));
+    debug!("cli.dry_run={}", dry_run);
+    debug!("cli.policy_path={}", cli_policy_str);
+    debug!("cli.config_path={}", cli_config_str);
+    debug!("cli.toggle_wifi={:?}", toggle_wifi_flag);
+    debug!("cli.wifi_rfkill={}", wifi_rfkill_cli_str);
 
-        logger.debug(&format!("cfg.dry_run={}", cfg.dry_run));
-        logger.debug(&format!("cfg.debug={}", cfg.debug));
-        logger.debug(&format!("cfg.policy_path={}", cfg_policy_str));
-        logger.debug(&format!("cfg.saving_cpu_freq={:?}", cfg.saving_cpu_freq));
-        logger.debug(&format!("cfg.hold_trigger_sec={:?}", cfg.hold_trigger_sec));
-        logger.debug(&format!("cfg.toggle_wifi={}", cfg.toggle_wifi));
-        logger.debug(&format!("cfg.wifi_rfkill={}", cfg_wifi_rfkill_str));
+    debug!("cfg.dry_run={}", cfg.dry_run);
+    debug!("cfg.policy_path={}", cfg_policy_str);
+    debug!("cfg.saving_cpu_freq={:?}", cfg.saving_cpu_freq);
+    debug!("cfg.hold_trigger_sec={:?}", cfg.hold_trigger_sec);
+    debug!("cfg.toggle_wifi={}", cfg.toggle_wifi);
+    debug!("cfg.wifi_rfkill={}", cfg_wifi_rfkill_str);
 
-        logger.debug(&format!(
-            "derived.hold_trigger_s={:.3}",
-            hold_trigger.as_secs_f32()
-        ));
-        logger.debug(&format!("derived.saving_cpu_freq={:?}", saving_cpu_freq));
-        logger.debug(&format!(
-            "derived.cpu_policy_path={}",
-            cpu_config.policy_path.display()
-        ));
-        logger.debug(&format!(
-            "derived.cpu_saving_min={:?}",
-            cpu_config.saving_min
-        ));
-        logger.debug(&format!(
-            "derived.cpu_saving_max={:?}",
-            cpu_config.saving_max
-        ));
-        logger.debug(&format!(
-            "derived.cpu_default_min={:?}",
-            cpu_config.default_min
-        ));
-        logger.debug(&format!(
-            "derived.cpu_default_max={:?}",
-            cpu_config.default_max
-        ));
-        logger.debug(&format!("derived.final_toggle_wifi={}", final_toggle_wifi));
-        logger.debug(&format!(
-            "derived.final_wifi_rfkill={}",
-            opt_to_str(&final_wifi_rfkill)
-        ));
-    }
+    debug!("derived.hold_trigger_s={:.3}", hold_trigger.as_secs_f32());
+    debug!("derived.saving_cpu_freq={:?}", saving_cpu_freq);
+    debug!(
+        "derived.cpu_policy_path={}",
+        cpu_config.policy_path.display()
+    );
+    debug!("derived.cpu_saving_min={:?}", cpu_config.saving_min);
+    debug!("derived.cpu_saving_max={:?}", cpu_config.saving_max);
+    debug!("derived.cpu_default_min={:?}", cpu_config.default_min);
+    debug!("derived.cpu_default_max={:?}", cpu_config.default_max);
+    debug!("derived.final_toggle_wifi={}", final_toggle_wifi);
+    debug!(
+        "derived.final_wifi_rfkill={}",
+        opt_to_str(&final_wifi_rfkill)
+    );
 
     let dev = match power_key::find_power_key() {
         Ok(Some(p)) => p,
         Ok(None) => {
-            logger.error("Power key device not found, exiting");
+            error!("Power key device not found, exiting");
             return;
         }
         Err(e) => {
-            logger.error(&format!("Failed to find power key: {}", e));
+            error!("Failed to find power key: {}", e);
             return;
         }
     };
 
-    logger.info(&format!("Using device {}", dev.display()));
+    info!("Using device {}", dev.display());
 
     let mut file = match File::open(&dev) {
         Ok(f) => f,
         Err(e) => {
-            logger.error(&format!("Failed to open device {}: {}", dev.display(), e));
+            error!("Failed to open device {}: {}", dev.display(), e);
             return;
         }
     };
@@ -201,10 +167,10 @@ fn main() {
     unsafe {
         let ret = libc::ioctl(fd, EVIOCGRAB as _, 1);
         if ret != 0 {
-            logger.warn("Failed to grab exclusive access to power key device");
-            logger.warn("LXDE may still receive power key events");
+            warn!("Failed to grab exclusive access to power key device");
+            warn!("LXDE may still receive power key events");
         } else {
-            logger.info("Successfully grabbed exclusive access to power key device");
+            info!("Successfully grabbed exclusive access to power key device");
         }
     }
 
@@ -216,14 +182,14 @@ fn main() {
     let epoll = match Epoll::new(EpollCreateFlags::empty()) {
         Ok(e) => e,
         Err(e) => {
-            logger.error(&format!("Failed to create epoll instance: {}", e));
+            error!("Failed to create epoll instance: {}", e);
             return;
         }
     };
 
     let event = EpollEvent::new(EpollFlags::EPOLLIN, 0);
     if let Err(e) = epoll.add(&file, event) {
-        logger.error(&format!("Failed to add input device to epoll: {}", e));
+        error!("Failed to add input device to epoll: {}", e);
         return;
     }
 
@@ -241,18 +207,18 @@ fn main() {
                                 let code = u16::from_ne_bytes(buf[18..20].try_into().unwrap());
                                 let value = i32::from_ne_bytes(buf[20..24].try_into().unwrap());
 
-                                logger.debug(&format!(
+                                debug!(
                                     "event: t={} ms={} type={} code={} value={}",
                                     sec, usec, etype, code, value
-                                ));
+                                );
 
                                 // KEY_POWER is 116
                                 if etype == 1 && code == 116 {
                                     if value == 1 {
-                                        logger.info("Power key down detected");
+                                        info!("Power key down detected");
                                         last_key_down_timestamp = Some(Instant::now());
                                     } else if value == 0 {
-                                        logger.info("Power key up detected");
+                                        info!("Power key up detected");
                                         if let Some(down_ts) = last_key_down_timestamp {
                                             let elapsed = down_ts.elapsed();
                                             if elapsed < hold_trigger {
@@ -260,7 +226,7 @@ fn main() {
                                                 let mode_clone = Arc::clone(&power_mode);
                                                 let cpu_config_clone = cpu_config.clone();
                                                 let dry_run_clone = dry_run;
-                                                let logger_clone = Logger::new(true);
+                                                /* no logger clone needed, using log macros */
                                                 let wifi_config_clone = wifi_config.clone();
 
                                                 spawn(move || {
@@ -271,7 +237,6 @@ fn main() {
                                                         PowerMode::Normal => {
                                                             enter_saving_mode(
                                                                 &cpu_config_clone,
-                                                                &logger_clone,
                                                                 dry_run_clone,
                                                                 Some(&wifi_config_clone),
                                                             );
@@ -280,7 +245,6 @@ fn main() {
                                                         PowerMode::Saving => {
                                                             exit_saving_mode(
                                                                 &cpu_config_clone,
-                                                                &logger_clone,
                                                                 dry_run_clone,
                                                                 Some(&wifi_config_clone),
                                                             );
@@ -289,7 +253,7 @@ fn main() {
                                                     }
                                                 });
                                             } else {
-                                                logger.info(
+                                                info!(
                                                     "Long press detected (no action implemented)",
                                                 );
                                             }
@@ -299,7 +263,7 @@ fn main() {
                                 }
                             }
                             Err(e) => {
-                                logger.warn(&format!("Error reading event: {}", e));
+                                warn!("Error reading event: {}", e);
                                 sleep(Duration::from_millis(200));
                             }
                         }
@@ -307,7 +271,7 @@ fn main() {
                 }
             }
             Err(e) => {
-                logger.warn(&format!("epoll_wait error: {}", e));
+                warn!("epoll_wait error: {}", e);
                 sleep(Duration::from_millis(500));
             }
         }
@@ -317,77 +281,23 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use log::{Level, LevelFilter};
 
     #[test]
-    fn test_parse_cli_args_from_flags() {
-        let tmp = std::env::temp_dir().join(format!(
-            "uconsole_cli_cfg_{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_millis()
-        ));
-        let _ = std::fs::create_dir_all(&tmp);
-        let cfg_path = tmp.join("cli_cfg");
-        std::fs::write(&cfg_path, "SAVING_CPU_FREQ=55,66\nHOLD_TRIGGER_SEC=1.4\n").unwrap();
-
-        let args = vec![
-            String::from("prog"),
-            String::from("--dry-run"),
-            String::from("--debug"),
-            String::from("--config"),
-            cfg_path.to_string_lossy().to_string(),
-        ];
-        let (dry_run, debug, _toggle_wifi, cli_config_path) = parse_cli_args_from(args);
-        assert!(dry_run);
-        assert!(debug);
-        assert_eq!(cli_config_path, Some(cfg_path.clone()));
-
-        // ensure the Config::load uses this file when provided
-        let loaded = Config::load(cli_config_path.clone());
-        assert_eq!(loaded.saving_cpu_freq.unwrap(), "55,66");
-        assert_eq!(loaded.hold_trigger_sec.unwrap(), 1.4_f32);
-        // no-op; this used to check default examples
+    fn resolve_prefers_rust_env() {
+        let resolved = resolve_log_level(Some("info".to_string()), 3, Some(Level::Debug));
+        assert_eq!(resolved, None);
     }
 
     #[test]
-    fn test_parse_cli_args_from_flags_eq_form() {
-        let tmp = std::env::temp_dir().join(format!(
-            "uconsole_cli_cfg_{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_millis()
-        ));
-        let _ = std::fs::create_dir_all(&tmp);
-        let cfg_path = tmp.join("cli_cfg2");
-        std::fs::write(&cfg_path, "SAVING_CPU_FREQ=22,33\nHOLD_TRIGGER_SEC=2.1\n").unwrap();
-
-        let args = vec![
-            String::from("prog"),
-            String::from("--dry-run"),
-            String::from("--debug"),
-            format!("--config={}", cfg_path.to_string_lossy()),
-        ];
-        let (dry_run, debug, _toggle_wifi, cli_config_path) = parse_cli_args_from(args);
-        assert!(dry_run);
-        assert!(debug);
-        assert_eq!(cli_config_path, Some(cfg_path.clone()));
-        let loaded = Config::load(cli_config_path.clone());
-        assert_eq!(loaded.saving_cpu_freq.unwrap(), "22,33");
-        assert_eq!(loaded.hold_trigger_sec.unwrap(), 2.1_f32);
+    fn resolve_verbosity_over_config() {
+        let resolved = resolve_log_level(None, 1, Some(Level::Debug));
+        assert_eq!(resolved, Some(LevelFilter::Info));
     }
 
     #[test]
-    fn test_toggle_wifi_cli_precedence_over_config() {
-        use uconsole_sleep::config::Config;
-        let mut cfg = Config::default();
-        cfg.toggle_wifi = true; // config enables wifi
-        let toggle_wifi_flag = Some(false);
-        let final_toggle_wifi = match toggle_wifi_flag {
-            Some(v) => v,
-            None => cfg.toggle_wifi,
-        };
-        assert_eq!(final_toggle_wifi, false);
+    fn resolve_config_when_no_env_no_verbosity() {
+        let resolved = resolve_log_level(None, 0, Some(Level::Warn));
+        assert_eq!(resolved, Some(LevelFilter::Warn));
     }
 }
