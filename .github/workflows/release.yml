@@ -60,23 +60,17 @@ jobs:
         env:
           PREFIX: /usr/local
         run: |
-          cargo deb --target ${{ matrix.target }} --no-default-features
+          cargo deb --target ${{ matrix.target }}
 
       - name: Find deb artifacts
         run: |
           echo 'Listing created .deb artifacts:'
           find target -type f -name "*.deb" -print || true
 
-      - name: Get version
-        shell: bash
-        run: |
-          VERSION=$(grep '^version =' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
-          echo "VERSION=$VERSION" >> $GITHUB_ENV
-
       - name: Upload built .deb artifacts
         uses: actions/upload-artifact@v5
         with:
-          name: rgrc-${{ env.VERSION }}-${{ matrix.target }}.deb
+          name: uconsole-sleep-${{ matrix.target }}.deb
           path: |
             target/debian/*.deb
   publish:
@@ -110,7 +104,6 @@ jobs:
       - uses: actions/checkout@v6
       - uses: actions-rs/toolchain@v1
         with:
-          profile: minimal
           toolchain: stable
       - name: Publish
         env:
