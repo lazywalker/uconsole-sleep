@@ -16,12 +16,12 @@ pub fn write_rfkill_state(logger: &Logger, path: &Path, block: bool, dry_run: bo
     if dry_run {
         logger.debug(&format!(
             "DRY-RUN: would write '{}' to {}",
-            if block { "1" } else { "0" },
+            if block { "0" } else { "1" },
             state.display()
         ));
         return;
     }
-    let _ = std::fs::write(&state, if block { "1" } else { "0" });
+    let _ = std::fs::write(&state, if block { "0" } else { "1" });
     logger.debug(&format!(
         "WiFi: {} via {}",
         if block { "blocked" } else { "unblocked" },
