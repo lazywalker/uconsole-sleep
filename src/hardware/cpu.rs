@@ -21,8 +21,12 @@ impl CpuFreqConfig {
 
     pub fn with_policy_path(policy_path: PathBuf, saving_cpu_freq: Option<String>) -> Self {
         let policy_path_clone = policy_path.clone();
-        let default_min = std::fs::read_to_string(policy_path_clone.join("scaling_min_freq")).ok();
-        let default_max = std::fs::read_to_string(policy_path_clone.join("scaling_max_freq")).ok();
+        let default_min = std::fs::read_to_string(policy_path_clone.join("scaling_min_freq"))
+            .ok()
+            .map(|s| s.trim().to_string());
+        let default_max = std::fs::read_to_string(policy_path_clone.join("scaling_max_freq"))
+            .ok()
+            .map(|s| s.trim().to_string());
 
         let (saving_min, saving_max) = if let Some(s) = saving_cpu_freq {
             let parts: Vec<&str> = s.split(',').collect();
