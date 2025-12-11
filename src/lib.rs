@@ -1,6 +1,7 @@
 //! Console Sleep Service Library
 //! Pure Rust implementation with zero external dependencies
 
+pub mod args;
 pub mod config;
 pub mod error;
 pub mod hardware;

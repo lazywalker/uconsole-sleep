@@ -19,6 +19,7 @@ use uconsole_sleep::hardware::power_key;
 
 use uconsole_sleep::CpuFreqConfig;
 use uconsole_sleep::WifiConfig;
+use uconsole_sleep::args::parse_cli_args;
 use uconsole_sleep::config::Config;
 use uconsole_sleep::power_mode::{PowerMode, enter_saving_mode, exit_saving_mode};
 
@@ -27,57 +28,29 @@ const EVIOCGRAB: u64 = 0x40044590;
 
 // Use PowerMode and enter/exit functions from the library `power_mode` module.
 
-/// Parse CLI args for a minimal set: --dry-run, --toggle-wifi, --config <path>
-fn parse_cli_args_from<I: IntoIterator<Item = String>>(
-    args: I,
-) -> (bool, Option<bool>, Option<PathBuf>) {
-    let mut dry_run = false;
-    let mut config_path: Option<PathBuf> = None;
-    let mut toggle_wifi: Option<bool> = None;
-    let mut iter = args.into_iter();
-    while let Some(a) = iter.next() {
-        match a.as_str() {
-            "--dry-run" => dry_run = true,
-            s if s.starts_with("--toggle-wifi") => {
-                if s == "--toggle-wifi" {
-                    toggle_wifi = Some(true);
-                } else if let Some(eq) = s.find('=') {
-                    let val = s[eq + 1..].to_ascii_lowercase();
-                    toggle_wifi = Some(val == "true" || val == "1" || val == "yes");
-                }
-            }
-            s if s.starts_with("--config") => {
-                if s == "--config" {
-                    if let Some(p) = iter.next() {
-                        config_path = Some(PathBuf::from(p));
-                    }
-                } else if let Some(eq) = s.find('=') {
-                    let p = &s[eq + 1..];
-                    if !p.is_empty() {
-                        config_path = Some(PathBuf::from(p));
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-    (dry_run, toggle_wifi, config_path)
-}
-
-fn parse_cli_args() -> (bool, Option<bool>, Option<PathBuf>) {
-    parse_cli_args_from(std::env::args())
-}
-
 fn main() {
     // parse basic CLI flags
-    let (dry_run, toggle_wifi_flag, cli_config_path) = parse_cli_args();
+    let (dry_run, verbosity, toggle_wifi_flag, cli_config_path) = parse_cli_args();
 
     // Read configuration (env vars + config file)
     let cfg = Config::load(cli_config_path.clone());
 
-    // Initialize env_logger; respect RUST_LOG environment variable
+    // Initialize env_logger; respect RUST_LOG unless overridden by verbosity CLI flags
     let mut builder = env_logger::builder();
-    builder.parse_filters(&std::env::var("RUST_LOG").unwrap_or_default());
+    match verbosity {
+        1 => {
+            builder.filter_level(log::LevelFilter::Info);
+        }
+        2 => {
+            builder.filter_level(log::LevelFilter::Debug);
+        }
+        3 => {
+            builder.filter_level(log::LevelFilter::Trace);
+        }
+        _ => {
+            builder.parse_filters(&std::env::var("RUST_LOG").unwrap_or_default());
+        }
+    };
     let _ = builder.try_init();
     info!("Starting sleep-remap-powerkey (power-saving mode toggle)");
 
@@ -293,81 +266,5 @@ fn main() {
                 sleep(Duration::from_millis(500));
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_parse_cli_args_from_flags() {
-        let tmp = std::env::temp_dir().join(format!(
-            "uconsole_cli_cfg_{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_millis()
-        ));
-        let _ = std::fs::create_dir_all(&tmp);
-        let cfg_path = tmp.join("cli_cfg");
-        std::fs::write(&cfg_path, "SAVING_CPU_FREQ=55,66\nHOLD_TRIGGER_SEC=1.4\n").unwrap();
-
-        let args = vec![
-            String::from("prog"),
-            String::from("--dry-run"),
-            String::from("--config"),
-            cfg_path.to_string_lossy().to_string(),
-        ];
-        let (dry_run, _toggle_wifi, cli_config_path) = parse_cli_args_from(args);
-        assert!(dry_run);
-        assert_eq!(cli_config_path, Some(cfg_path.clone()));
-
-        // ensure the Config::load uses this file when provided
-        let loaded = Config::load(cli_config_path.clone());
-        assert_eq!(loaded.saving_cpu_freq.unwrap(), "55,66");
-        assert_eq!(loaded.hold_trigger_sec.unwrap(), 1.4_f32);
-        // no-op; this used to check default examples
-    }
-
-    #[test]
-    fn test_parse_cli_args_from_flags_eq_form() {
-        let tmp = std::env::temp_dir().join(format!(
-            "uconsole_cli_cfg_{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_millis()
-        ));
-        let _ = std::fs::create_dir_all(&tmp);
-        let cfg_path = tmp.join("cli_cfg2");
-        std::fs::write(&cfg_path, "SAVING_CPU_FREQ=22,33\nHOLD_TRIGGER_SEC=2.1\n").unwrap();
-
-        let args = vec![
-            String::from("prog"),
-            String::from("--dry-run"),
-            format!("--config={}", cfg_path.to_string_lossy()),
-        ];
-        let (dry_run, _toggle_wifi, cli_config_path) = parse_cli_args_from(args);
-        assert!(dry_run);
-        assert_eq!(cli_config_path, Some(cfg_path.clone()));
-        let loaded = Config::load(cli_config_path.clone());
-        assert_eq!(loaded.saving_cpu_freq.unwrap(), "22,33");
-        assert_eq!(loaded.hold_trigger_sec.unwrap(), 2.1_f32);
-    }
-
-    #[test]
-    fn test_toggle_wifi_cli_precedence_over_config() {
-        use uconsole_sleep::config::Config;
-        let cfg = Config {
-            toggle_wifi: true,
-            ..Default::default()
-        };
-        let toggle_wifi_flag = Some(false);
-        let final_toggle_wifi = match toggle_wifi_flag {
-            Some(v) => v,
-            None => cfg.toggle_wifi,
-        };
-        assert!(!final_toggle_wifi);
     }
 }

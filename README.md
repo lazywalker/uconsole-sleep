@@ -40,7 +40,7 @@ sudo ./target/release/uconsole-sleep
 default `/etc/uconsole-sleep/config` or repo `./etc/uconsole-sleep/config.default`
 
 sudo ./target/release/uconsole-sleep --config /path/to/config
- - Use `RUST_LOG` environment variable to control logging level (e.g. `RUST_LOG=debug`).
+ - Use `RUST_LOG` environment variable to control logging level (e.g. `RUST_LOG=debug`) or CLI flags `-v` (info), `-vv` (debug), `-vvv` (trace).
 
 Examples:
 ```bash
