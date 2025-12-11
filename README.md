@@ -24,18 +24,15 @@ Usage (run as root to write sysfs, grab input device, and manage power):
 sudo ./target/release/uconsole-sleep
 ```
 
-CLI flags:
-- `--dry-run`: log actions without writing to sysfs (useful for debugging)
-- `--debug` or `-v`: enable debug logging
-- `--policy-path <path>`: use a custom CPU policy path (useful for testing or non-standard systems)
+# To override the configuration location (default `/etc/uconsole-sleep/config` or repo `./etc/uconsole-sleep/config.default`)
+sudo ./target/release/uconsole-sleep --config /path/to/config
+ - `--debug` or `-v`: enable debug logging
 
 Examples:
 ```bash
 # Dry run (no writes), enable debug logging
 sudo ./target/release/uconsole-sleep --dry-run --debug
 
-# Use a fake policy path for testing
-sudo ./target/release/uconsole-sleep --policy-path /tmp/fake_policy
 ```
 
 How it works:

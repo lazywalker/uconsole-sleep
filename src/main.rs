@@ -27,52 +27,61 @@ const EVIOCGRAB: u64 = 0x40044590;
 
 // Use PowerMode and enter/exit functions from the library `power_mode` module.
 
-/// Parse CLI args for a minimal set: --dry-run, --debug, --policy-path <path>
+/// Parse CLI args for a minimal set: --dry-run, --debug, --policy-path <path>, --config <path>
 fn parse_cli_args_from<I: IntoIterator<Item = String>>(
     args: I,
-) -> (bool, bool, Option<PathBuf>, bool, Option<PathBuf>) {
+) -> (bool, bool, Option<bool>, Option<PathBuf>) {
     let mut dry_run = false;
     let mut debug = false;
-    let mut policy: Option<PathBuf> = None;
-    let mut toggle_wifi = false;
-    let mut wifi_rfkill: Option<PathBuf> = None;
+    let mut config_path: Option<PathBuf> = None;
+    let mut toggle_wifi: Option<bool> = None;
+    // --policy-path and --wifi-rfkill are deprecated; config will be used instead
     let mut iter = args.into_iter();
     while let Some(a) = iter.next() {
         match a.as_str() {
             "--dry-run" => dry_run = true,
             "--debug" | "-v" | "--verbose" => debug = true,
-            "--policy-path" => {
-                if let Some(p) = iter.next() {
-                    policy = Some(PathBuf::from(p));
+            s if s.starts_with("--toggle-wifi") => {
+                if s == "--toggle-wifi" {
+                    toggle_wifi = Some(true);
+                } else if let Some(eq) = s.find('=') {
+                    let val = s[eq + 1..].to_ascii_lowercase();
+                    toggle_wifi = Some(val == "true" || val == "1" || val == "yes");
                 }
             }
-            "--toggle-wifi" => {
-                toggle_wifi = true;
-            }
-            "--wifi-rfkill" => {
-                if let Some(p) = iter.next() {
-                    wifi_rfkill = Some(PathBuf::from(p));
+            s if s.starts_with("--config") => {
+                if s == "--config" {
+                    if let Some(p) = iter.next() {
+                        config_path = Some(PathBuf::from(p));
+                    }
+                } else if let Some(eq) = s.find('=') {
+                    let p = &s[eq + 1..];
+                    if !p.is_empty() {
+                        config_path = Some(PathBuf::from(p));
+                    }
                 }
             }
             _ => {}
         }
     }
-    (dry_run, debug, policy, toggle_wifi, wifi_rfkill)
+    (dry_run, debug, toggle_wifi, config_path)
 }
 
-fn parse_cli_args() -> (bool, bool, Option<PathBuf>, bool, Option<PathBuf>) {
+fn parse_cli_args() -> (bool, bool, Option<bool>, Option<PathBuf>) {
     parse_cli_args_from(std::env::args())
 }
 
 fn main() {
     // parse basic CLI flags
-    let (dry_run, debug_flag, cli_policy_path, toggle_wifi_flag, wifi_rfkill_path) =
-        parse_cli_args();
-    let logger = Logger::new(debug_flag);
-    logger.info("Starting sleep-remap-powerkey (power-saving mode toggle)");
+    let (dry_run, cli_debug_flag, toggle_wifi_flag, cli_config_path) = parse_cli_args();
 
     // Read configuration (env vars + config file)
-    let cfg = Config::load(None);
+    let cfg = Config::load(cli_config_path.clone());
+
+    // Determine final debug flag: CLI flag takes precedence over config file
+    let final_debug_flag = cli_debug_flag || cfg.debug;
+    let logger = Logger::new(final_debug_flag);
+    logger.info("Starting sleep-remap-powerkey (power-saving mode toggle)");
 
     let hold_trigger = Duration::from_secs_f32(
         cfg.hold_trigger_sec
@@ -92,40 +101,37 @@ fn main() {
         .saving_cpu_freq
         .clone()
         .or_else(|| env::var("SAVING_CPU_FREQ").ok());
-    let cpu_config = if let Some(path) = cli_policy_path.clone() {
+    let cpu_config = if let Some(path) = cfg.policy_path.clone() {
         CpuFreqConfig::with_policy_path(path, saving_cpu_freq.clone())
     } else {
         CpuFreqConfig::new(saving_cpu_freq.clone())
     };
     // Determine wifi config: CLI flag overrides config file; use clones to avoid moving original variables used for logging
-    let final_enable_wifi = if toggle_wifi_flag {
-        true
-    } else {
-        cfg.toggle_wifi
+    let final_toggle_wifi = match toggle_wifi_flag {
+        Some(v) => v,
+        None => cfg.toggle_wifi,
     };
-    let final_wifi_rfkill = if wifi_rfkill_path.is_some() {
-        wifi_rfkill_path.clone()
-    } else {
-        cfg.wifi_rfkill_path.clone()
-    };
-    let wifi_config = WifiConfig::new(final_enable_wifi, final_wifi_rfkill.clone());
+    let final_wifi_rfkill = cfg.wifi_rfkill_path.clone();
+    let wifi_config = WifiConfig::new(final_toggle_wifi, final_wifi_rfkill.clone());
 
     // Print all parameters for startup debugging (capture a string for options to avoid moves)
     let opt_to_str = |p: &Option<PathBuf>| match p {
         Some(pp) => pp.display().to_string(),
         None => "None".to_string(),
     };
-    let cli_policy_str = opt_to_str(&cli_policy_path);
-    let wifi_rfkill_cli_str = opt_to_str(&wifi_rfkill_path);
+    let cli_policy_str = "None".to_string();
+    let wifi_rfkill_cli_str = "None".to_string();
+    let cli_config_str = opt_to_str(&cli_config_path);
     let cfg_policy_str = opt_to_str(&cfg.policy_path);
     let cfg_wifi_rfkill_str = opt_to_str(&cfg.wifi_rfkill_path);
 
     // Log start-up parameters only when debug was requested. One parameter per line for readability.
-    if debug_flag {
+    if final_debug_flag {
         logger.debug(&format!("cli.dry_run={}", dry_run));
-        logger.debug(&format!("cli.debug={}", debug_flag));
+        logger.debug(&format!("cli.debug={}", cli_debug_flag));
         logger.debug(&format!("cli.policy_path={}", cli_policy_str));
-        logger.debug(&format!("cli.toggle_wifi={}", toggle_wifi_flag));
+        logger.debug(&format!("cli.config_path={}", cli_config_str));
+        logger.debug(&format!("cli.toggle_wifi={:?}", toggle_wifi_flag));
         logger.debug(&format!("cli.wifi_rfkill={}", wifi_rfkill_cli_str));
 
         logger.debug(&format!("cfg.dry_run={}", cfg.dry_run));
@@ -136,15 +142,36 @@ fn main() {
         logger.debug(&format!("cfg.toggle_wifi={}", cfg.toggle_wifi));
         logger.debug(&format!("cfg.wifi_rfkill={}", cfg_wifi_rfkill_str));
 
-        logger.debug(&format!("derived.hold_trigger_s={:.3}", hold_trigger.as_secs_f32()));
+        logger.debug(&format!(
+            "derived.hold_trigger_s={:.3}",
+            hold_trigger.as_secs_f32()
+        ));
         logger.debug(&format!("derived.saving_cpu_freq={:?}", saving_cpu_freq));
-        logger.debug(&format!("derived.cpu_policy_path={}", cpu_config.policy_path.display()));
-        logger.debug(&format!("derived.cpu_saving_min={:?}", cpu_config.saving_min));
-        logger.debug(&format!("derived.cpu_saving_max={:?}", cpu_config.saving_max));
-        logger.debug(&format!("derived.cpu_default_min={:?}", cpu_config.default_min));
-        logger.debug(&format!("derived.cpu_default_max={:?}", cpu_config.default_max));
-        logger.debug(&format!("derived.final_enable_wifi={}", final_enable_wifi));
-        logger.debug(&format!("derived.final_wifi_rfkill={}", opt_to_str(&final_wifi_rfkill)));
+        logger.debug(&format!(
+            "derived.cpu_policy_path={}",
+            cpu_config.policy_path.display()
+        ));
+        logger.debug(&format!(
+            "derived.cpu_saving_min={:?}",
+            cpu_config.saving_min
+        ));
+        logger.debug(&format!(
+            "derived.cpu_saving_max={:?}",
+            cpu_config.saving_max
+        ));
+        logger.debug(&format!(
+            "derived.cpu_default_min={:?}",
+            cpu_config.default_min
+        ));
+        logger.debug(&format!(
+            "derived.cpu_default_max={:?}",
+            cpu_config.default_max
+        ));
+        logger.debug(&format!("derived.final_toggle_wifi={}", final_toggle_wifi));
+        logger.debug(&format!(
+            "derived.final_wifi_rfkill={}",
+            opt_to_str(&final_wifi_rfkill)
+        ));
     }
 
     let dev = match power_key::find_power_key() {
@@ -293,17 +320,74 @@ mod tests {
 
     #[test]
     fn test_parse_cli_args_from_flags() {
+        let tmp = std::env::temp_dir().join(format!(
+            "uconsole_cli_cfg_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis()
+        ));
+        let _ = std::fs::create_dir_all(&tmp);
+        let cfg_path = tmp.join("cli_cfg");
+        std::fs::write(&cfg_path, "SAVING_CPU_FREQ=55,66\nHOLD_TRIGGER_SEC=1.4\n").unwrap();
+
         let args = vec![
             String::from("prog"),
             String::from("--dry-run"),
             String::from("--debug"),
-            String::from("--policy-path"),
-            String::from("/tmp"),
+            String::from("--config"),
+            cfg_path.to_string_lossy().to_string(),
         ];
-        let (dry_run, debug, path, _toggle_wifi_flag, _wifi_rfkill_path) =
-            parse_cli_args_from(args);
+        let (dry_run, debug, _toggle_wifi, cli_config_path) = parse_cli_args_from(args);
         assert!(dry_run);
         assert!(debug);
-        assert_eq!(path, Some(PathBuf::from("/tmp")));
+        assert_eq!(cli_config_path, Some(cfg_path.clone()));
+
+        // ensure the Config::load uses this file when provided
+        let loaded = Config::load(cli_config_path.clone());
+        assert_eq!(loaded.saving_cpu_freq.unwrap(), "55,66");
+        assert_eq!(loaded.hold_trigger_sec.unwrap(), 1.4_f32);
+        // no-op; this used to check default examples
+    }
+
+    #[test]
+    fn test_parse_cli_args_from_flags_eq_form() {
+        let tmp = std::env::temp_dir().join(format!(
+            "uconsole_cli_cfg_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis()
+        ));
+        let _ = std::fs::create_dir_all(&tmp);
+        let cfg_path = tmp.join("cli_cfg2");
+        std::fs::write(&cfg_path, "SAVING_CPU_FREQ=22,33\nHOLD_TRIGGER_SEC=2.1\n").unwrap();
+
+        let args = vec![
+            String::from("prog"),
+            String::from("--dry-run"),
+            String::from("--debug"),
+            format!("--config={}", cfg_path.to_string_lossy()),
+        ];
+        let (dry_run, debug, _toggle_wifi, cli_config_path) = parse_cli_args_from(args);
+        assert!(dry_run);
+        assert!(debug);
+        assert_eq!(cli_config_path, Some(cfg_path.clone()));
+        let loaded = Config::load(cli_config_path.clone());
+        assert_eq!(loaded.saving_cpu_freq.unwrap(), "22,33");
+        assert_eq!(loaded.hold_trigger_sec.unwrap(), 2.1_f32);
+    }
+
+    #[test]
+    fn test_toggle_wifi_cli_precedence_over_config() {
+        use uconsole_sleep::config::Config;
+        let mut cfg = Config::default();
+        cfg.toggle_wifi = true; // config enables wifi
+        let toggle_wifi_flag = Some(false);
+        let final_toggle_wifi = match toggle_wifi_flag {
+            Some(v) => v,
+            None => cfg.toggle_wifi,
+        };
+        assert_eq!(final_toggle_wifi, false);
     }
 }
