@@ -9,8 +9,8 @@ pub mod power_mode;
 
 pub use config::Config;
 pub use error::Error;
-pub use hardware::CpuFreqConfig;
-pub use hardware::wifi::WifiConfig;
+pub use hardware::cpu::CpuFreqConfig;
+pub use hardware::rf::{BTConfig, WifiConfig};
 pub use hardware::*;
 pub use power_mode::PowerMode;
 pub use power_mode::{enter_saving_mode, exit_saving_mode};

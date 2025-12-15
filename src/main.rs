@@ -17,6 +17,7 @@ use nix::sys::epoll::{Epoll, EpollCreateFlags, EpollEvent, EpollFlags};
 use log::{Level, LevelFilter, debug, error, info, warn};
 use uconsole_sleep::hardware::power_key;
 
+use uconsole_sleep::BTConfig;
 use uconsole_sleep::CpuFreqConfig;
 use uconsole_sleep::WifiConfig;
 use uconsole_sleep::args::parse_cli_args;
@@ -50,7 +51,7 @@ fn resolve_log_level(
 
 fn main() {
     // parse basic CLI flags
-    let (dry_run, verbosity, toggle_wifi_flag, cli_config_path) = parse_cli_args();
+    let (dry_run, verbosity, toggle_wifi_flag, toggle_bt_flag, cli_config_path) = parse_cli_args();
 
     // Read configuration (env vars + config file)
     let cfg = Config::load(cli_config_path.clone());
@@ -92,13 +93,19 @@ fn main() {
     } else {
         CpuFreqConfig::new(saving_cpu_freq.clone())
     };
-    // Determine wifi config: CLI flag overrides config file; use clones to avoid moving original variables used for logging
+    // Determine wifi and bt config: CLI flags override config file; use clones to avoid moving original variables used for logging
     let final_toggle_wifi = match toggle_wifi_flag {
         Some(v) => v,
         None => cfg.toggle_wifi,
     };
+    let final_toggle_bt = match toggle_bt_flag {
+        Some(v) => v,
+        None => cfg.toggle_bt,
+    };
     let final_wifi_rfkill = cfg.wifi_rfkill_path.clone();
+    let final_bt_rfkill = cfg.bt_rfkill_path.clone();
     let wifi_config = WifiConfig::new(final_toggle_wifi, final_wifi_rfkill.clone());
+    let bt_config = BTConfig::new(final_toggle_bt, final_bt_rfkill.clone());
 
     // Print all parameters for startup debugging (capture a string for options to avoid moves)
     let opt_to_str = |p: &Option<PathBuf>| match p {
@@ -107,22 +114,28 @@ fn main() {
     };
     let cli_policy_str = "None".to_string();
     let wifi_rfkill_cli_str = "None".to_string();
+    let bt_rfkill_cli_str = "None".to_string();
     let cli_config_str = opt_to_str(&cli_config_path);
     let cfg_policy_str = opt_to_str(&cfg.policy_path);
     let cfg_wifi_rfkill_str = opt_to_str(&cfg.wifi_rfkill_path);
+    let cfg_bt_rfkill_str = opt_to_str(&cfg.bt_rfkill_path);
 
     debug!("cli.dry_run={}", dry_run);
     debug!("cli.policy_path={}", cli_policy_str);
     debug!("cli.config_path={}", cli_config_str);
     debug!("cli.toggle_wifi={:?}", toggle_wifi_flag);
+    debug!("cli.toggle_bt={:?}", toggle_bt_flag);
     debug!("cli.wifi_rfkill={}", wifi_rfkill_cli_str);
+    debug!("cli.bt_rfkill={}", bt_rfkill_cli_str);
 
     debug!("cfg.dry_run={}", cfg.dry_run);
     debug!("cfg.policy_path={}", cfg_policy_str);
     debug!("cfg.saving_cpu_freq={:?}", cfg.saving_cpu_freq);
     debug!("cfg.hold_trigger_sec={:?}", cfg.hold_trigger_sec);
     debug!("cfg.toggle_wifi={}", cfg.toggle_wifi);
+    debug!("cfg.toggle_bt={}", cfg.toggle_bt);
     debug!("cfg.wifi_rfkill={}", cfg_wifi_rfkill_str);
+    debug!("cfg.bt_rfkill={}", cfg_bt_rfkill_str);
 
     debug!("derived.hold_trigger_s={:.3}", hold_trigger.as_secs_f32());
     debug!("derived.saving_cpu_freq={:?}", saving_cpu_freq);
@@ -228,6 +241,7 @@ fn main() {
                                                 let dry_run_clone = dry_run;
                                                 /* no logger clone needed, using log macros */
                                                 let wifi_config_clone = wifi_config.clone();
+                                                let bt_config_clone = bt_config.clone();
 
                                                 spawn(move || {
                                                     let mut mode = mode_clone.lock().unwrap();
@@ -239,6 +253,7 @@ fn main() {
                                                                 &cpu_config_clone,
                                                                 dry_run_clone,
                                                                 Some(&wifi_config_clone),
+                                                                Some(&bt_config_clone),
                                                             );
                                                             *mode = PowerMode::Saving;
                                                         }
@@ -247,6 +262,7 @@ fn main() {
                                                                 &cpu_config_clone,
                                                                 dry_run_clone,
                                                                 Some(&wifi_config_clone),
+                                                                Some(&bt_config_clone),
                                                             );
                                                             *mode = PowerMode::Normal;
                                                         }

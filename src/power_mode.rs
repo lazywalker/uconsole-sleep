@@ -1,7 +1,7 @@
 //! Power mode helper - combines display toggling with CPU frequency changes
 
 use crate::hardware::{backlight, drm_panel, framebuffer};
-use crate::{CpuFreqConfig, WifiConfig};
+use crate::{BTConfig, CpuFreqConfig, WifiConfig};
 use log::{debug, info, warn};
 use std::fs;
 
@@ -58,7 +58,12 @@ pub enum PowerMode {
     Saving,
 }
 
-pub fn enter_saving_mode(cpu_config: &CpuFreqConfig, dry_run: bool, wifi: Option<&WifiConfig>) {
+pub fn enter_saving_mode(
+    cpu_config: &CpuFreqConfig,
+    dry_run: bool,
+    wifi: Option<&WifiConfig>,
+    bt: Option<&BTConfig>,
+) {
     info!("Entering power-saving mode");
     if let Err(e) = toggle_display(dry_run) {
         warn!("toggle_display failed: {}", e);
@@ -67,10 +72,18 @@ pub fn enter_saving_mode(cpu_config: &CpuFreqConfig, dry_run: bool, wifi: Option
     if let Some(w) = wifi {
         w.block(dry_run);
     }
+    if let Some(b) = bt {
+        b.block(dry_run);
+    }
 }
 
 /// Exit power-saving mode: restore CPU then turn display on
-pub fn exit_saving_mode(cpu_config: &CpuFreqConfig, dry_run: bool, wifi: Option<&WifiConfig>) {
+pub fn exit_saving_mode(
+    cpu_config: &CpuFreqConfig,
+    dry_run: bool,
+    wifi: Option<&WifiConfig>,
+    bt: Option<&BTConfig>,
+) {
     info!("Exiting power-saving mode");
     cpu_config.apply_normal_mode(dry_run);
     if let Err(e) = toggle_display(dry_run) {
@@ -78,6 +91,9 @@ pub fn exit_saving_mode(cpu_config: &CpuFreqConfig, dry_run: bool, wifi: Option<
     }
     if let Some(w) = wifi {
         w.unblock(dry_run);
+    }
+    if let Some(b) = bt {
+        b.unblock(dry_run);
     }
 }
 
@@ -99,16 +115,16 @@ mod tests {
         let _ = fs::create_dir_all(&tmp);
         let cpu = CpuFreqConfig::with_policy_path(tmp.clone(), Some(String::from("100,200")));
         // Dry run should not create policy files
-        enter_saving_mode(&cpu, true, None);
+        enter_saving_mode(&cpu, true, None, None);
         assert!(!tmp.join("scaling_min_freq").exists());
         assert!(!tmp.join("scaling_max_freq").exists());
 
         // Non-dry-run should write
-        enter_saving_mode(&cpu, false, None);
+        enter_saving_mode(&cpu, false, None, None);
         assert!(tmp.join("scaling_min_freq").exists());
         assert!(tmp.join("scaling_max_freq").exists());
 
         // exit - verify it doesn't panic
-        exit_saving_mode(&cpu, false, None);
+        exit_saving_mode(&cpu, false, None, None);
     }
 }

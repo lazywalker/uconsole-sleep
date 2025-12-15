@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 
-use crate::wifi;
+use crate::hardware::rf;
 use log::Level;
 
 #[derive(Clone, Debug, Default)]
@@ -19,6 +19,8 @@ pub struct Config {
     pub hold_trigger_sec: Option<f32>,
     pub toggle_wifi: bool,
     pub wifi_rfkill_path: Option<PathBuf>,
+    pub toggle_bt: bool,
+    pub bt_rfkill_path: Option<PathBuf>,
     pub log_level: Option<Level>,
 }
 
@@ -70,6 +72,12 @@ impl Config {
         if let Ok(v) = std::env::var("WIFI_RFKILL") {
             cfg.wifi_rfkill_path = Some(PathBuf::from(v));
         }
+        if let Ok(v) = std::env::var("TOGGLE_BT") {
+            cfg.toggle_bt = parse_bool(&v);
+        }
+        if let Ok(v) = std::env::var("BT_RFKILL") {
+            cfg.bt_rfkill_path = Some(PathBuf::from(v));
+        }
         if let Ok(v) = std::env::var("LOG_LEVEL")
             && let Ok(l) = v.parse::<log::Level>()
         {
@@ -105,6 +113,12 @@ impl Config {
             if let Some(v) = map.get("WIFI_RFKILL") {
                 cfg.wifi_rfkill_path = Some(PathBuf::from(v));
             }
+            if let Some(v) = map.get("TOGGLE_BT") {
+                cfg.toggle_bt = parse_bool(v);
+            }
+            if let Some(v) = map.get("BT_RFKILL") {
+                cfg.bt_rfkill_path = Some(PathBuf::from(v));
+            }
             if let Some(v) = map.get("LOG_LEVEL")
                 && let Ok(l) = v.parse::<log::Level>()
             {
@@ -114,7 +128,11 @@ impl Config {
 
         // final: if wifi enabled and no rfkill path provided, set default
         if cfg.toggle_wifi && cfg.wifi_rfkill_path.is_none() {
-            cfg.wifi_rfkill_path = Some(PathBuf::from(wifi::RFKILL_PATH));
+            cfg.wifi_rfkill_path = Some(PathBuf::from(rf::RFKILL_PATH_WIFI));
+        }
+        // final: if bt enabled and no rfkill path provided, set default
+        if cfg.toggle_bt && cfg.bt_rfkill_path.is_none() {
+            cfg.bt_rfkill_path = Some(PathBuf::from(rf::RFKILL_PATH_BT));
         }
 
         cfg
@@ -128,7 +146,7 @@ impl Config {
 
 #[cfg(test)]
 mod tests {
-    use crate::wifi;
+    use crate::hardware::rf;
 
     use super::*;
     use std::env;
@@ -159,7 +177,27 @@ mod tests {
         assert!(cfg.toggle_wifi);
         assert_eq!(
             cfg.wifi_rfkill_path.unwrap(),
-            PathBuf::from(wifi::RFKILL_PATH)
+            PathBuf::from(rf::RFKILL_PATH_WIFI)
+        );
+    }
+
+    #[test]
+    fn test_bt_default_rfkill() {
+        let tmp = env::temp_dir().join(format!(
+            "uconsole_cfg_bt_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis()
+        ));
+        let _ = fs::create_dir_all(&tmp);
+        let cfg_file = tmp.join("cfg_bt");
+        fs::write(&cfg_file, "TOGGLE_BT=true\n").unwrap();
+        let cfg = Config::load(Some(cfg_file.clone()));
+        assert!(cfg.toggle_bt);
+        assert_eq!(
+            cfg.bt_rfkill_path.unwrap(),
+            PathBuf::from(rf::RFKILL_PATH_BT)
         );
     }
 

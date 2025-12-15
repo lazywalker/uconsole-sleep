@@ -3,11 +3,12 @@ use std::path::PathBuf;
 /// Parse CLI args for a minimal set: --dry-run, --toggle-wifi, --config <path>
 fn parse_cli_args_from<I: IntoIterator<Item = String>>(
     args: I,
-) -> (bool, u8, Option<bool>, Option<PathBuf>) {
+) -> (bool, u8, Option<bool>, Option<bool>, Option<PathBuf>) {
     let mut dry_run = false;
     let mut verbosity: u8 = 0;
     let mut config_path: Option<PathBuf> = None;
     let mut toggle_wifi: Option<bool> = None;
+    let mut toggle_bt: Option<bool> = None;
     let mut iter = args.into_iter();
     while let Some(a) = iter.next() {
         match a.as_str() {
@@ -29,6 +30,14 @@ fn parse_cli_args_from<I: IntoIterator<Item = String>>(
                     toggle_wifi = Some(val == "true" || val == "1" || val == "yes");
                 }
             }
+            s if s.starts_with("--toggle-bt") => {
+                if s == "--toggle-bt" {
+                    toggle_bt = Some(true);
+                } else if let Some(eq) = s.find('=') {
+                    let val = s[eq + 1..].to_ascii_lowercase();
+                    toggle_bt = Some(val == "true" || val == "1" || val == "yes");
+                }
+            }
             s if s.starts_with("--config") => {
                 if s == "--config" {
                     if let Some(p) = iter.next() {
@@ -44,10 +53,10 @@ fn parse_cli_args_from<I: IntoIterator<Item = String>>(
             _ => {}
         }
     }
-    (dry_run, verbosity, toggle_wifi, config_path)
+    (dry_run, verbosity, toggle_wifi, toggle_bt, config_path)
 }
 
-pub fn parse_cli_args() -> (bool, u8, Option<bool>, Option<PathBuf>) {
+pub fn parse_cli_args() -> (bool, u8, Option<bool>, Option<bool>, Option<PathBuf>) {
     parse_cli_args_from(std::env::args())
 }
 
@@ -76,7 +85,8 @@ mod tests {
             String::from("--config"),
             cfg_path.to_string_lossy().to_string(),
         ];
-        let (dry_run, verbosity, _toggle_wifi, cli_config_path) = parse_cli_args_from(args);
+        let (dry_run, verbosity, _toggle_wifi, _toggle_bt, cli_config_path) =
+            parse_cli_args_from(args);
         assert!(dry_run);
         assert_eq!(verbosity, 0);
         assert_eq!(cli_config_path, Some(cfg_path.clone()));
@@ -106,7 +116,8 @@ mod tests {
             String::from("--dry-run"),
             format!("--config={}", cfg_path.to_string_lossy()),
         ];
-        let (dry_run, verbosity, _toggle_wifi, cli_config_path) = parse_cli_args_from(args);
+        let (dry_run, verbosity, _toggle_wifi, _toggle_bt, cli_config_path) =
+            parse_cli_args_from(args);
         assert!(dry_run);
         assert_eq!(verbosity, 0);
         assert_eq!(cli_config_path, Some(cfg_path.clone()));
@@ -133,21 +144,24 @@ mod tests {
     #[test]
     fn test_parse_cli_args_verbosity_v() {
         let args = vec![String::from("prog"), String::from("-v")];
-        let (_dry_run, verbosity, _toggle_wifi, _cli_config_path) = parse_cli_args_from(args);
+        let (_dry_run, verbosity, _toggle_wifi, _toggle_bt, _cli_config_path) =
+            parse_cli_args_from(args);
         assert_eq!(verbosity, 1);
     }
 
     #[test]
     fn test_parse_cli_args_verbosity_vv() {
         let args = vec![String::from("prog"), String::from("-vv")];
-        let (_dry_run, verbosity, _toggle_wifi, _cli_config_path) = parse_cli_args_from(args);
+        let (_dry_run, verbosity, _toggle_wifi, _toggle_bt, _cli_config_path) =
+            parse_cli_args_from(args);
         assert_eq!(verbosity, 2);
     }
 
     #[test]
     fn test_parse_cli_args_verbosity_vvv() {
         let args = vec![String::from("prog"), String::from("-vvv")];
-        let (_dry_run, verbosity, _toggle_wifi, _cli_config_path) = parse_cli_args_from(args);
+        let (_dry_run, verbosity, _toggle_wifi, _toggle_bt, _cli_config_path) =
+            parse_cli_args_from(args);
         assert_eq!(verbosity, 3);
     }
 }
