@@ -19,7 +19,7 @@ Binary:
 Power-saving mode includes:
 - Display off (backlight control via sysfs)
 - Reduced CPU frequency (configurable via `SAVING_CPU_FREQ`)
-- Future extensibility: WiFi control, etc.
+- Future extensibility: WiFi control, Bluetooth control, etc.
 
 Environment variables:
 - `SAVING_CPU_FREQ` — set to `min,max` in MHz (e.g. `100,600`) to apply when in power-saving mode
@@ -41,11 +41,14 @@ default `/etc/uconsole-sleep/config` or repo `./etc/uconsole-sleep/config.defaul
 
 sudo ./target/release/uconsole-sleep --config /path/to/config
  - Use `RUST_LOG` environment variable to control logging level (e.g. `RUST_LOG=debug`) or CLI flags `-v` (info), `-vv` (debug), `-vvv` (trace).
+ - Run `uconsole-sleep -h` or `uconsole-sleep --help` to print usage and available options such as `--dry-run`, `--toggle-wifi`, `--toggle-bt`, and `--config`.
 
 Examples:
 ```bash
 # Dry run (no writes)
 sudo ./target/release/uconsole-sleep --dry-run
+# Show help
+sudo ./target/release/uconsole-sleep --help
 
 ```
 
