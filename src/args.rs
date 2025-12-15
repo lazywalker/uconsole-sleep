@@ -56,7 +56,31 @@ fn parse_cli_args_from<I: IntoIterator<Item = String>>(
     (dry_run, verbosity, toggle_wifi, toggle_bt, config_path)
 }
 
+fn print_help() {
+    // Basic usage/help text
+    println!("uconsole-sleep {}\n", env!("CARGO_PKG_VERSION"));
+    println!("Usage: uconsole-sleep [OPTIONS]");
+    println!("\nOptions:");
+    println!("  --config[=PATH]      Load configuration from PATH");
+    println!("  --toggle-wifi[=VAL]  Toggle WiFi; VAL can be true/false/1/0/yes/no");
+    println!("  --toggle-bt[=VAL]    Toggle Bluetooth; VAL can be true/false/1/0/yes/no");
+    println!("  --dry-run            Don't actually perform changes; just log actions");
+    println!();
+    println!("  -v, -vv, -vvv        Increase verbosity (max 3)");
+    println!("  --verbose            Same as -v");
+    println!("  -h, --help           Print this help message and exit");
+}
+
 pub fn parse_cli_args() -> (bool, u8, Option<bool>, Option<bool>, Option<PathBuf>) {
+    // If the user asked for help, print and exit; keep parse_cli_args_from unchanged so unit
+    // tests that call it directly are unaffected.
+    for a in std::env::args() {
+        if a == "-h" || a == "--help" {
+            print_help();
+            std::process::exit(0);
+        }
+    }
+
     parse_cli_args_from(std::env::args())
 }
 
