@@ -68,10 +68,10 @@ impl WifiConfig {
         if let Some(path) = &self.rfkill_path {
             let state = path.join("state");
             if dry_run {
-                debug!("DRY-RUN: would write '1' to {}", state.display());
+                debug!("DRY-RUN: would write '0' to {}", state.display());
                 return;
             }
-            let _ = fs::write(&state, "1");
+            let _ = fs::write(&state, "0");
             debug!("WiFi: blocked via {}", state.display());
         } else {
             warn!("WiFi toggling enabled but no rfkill path provided");
@@ -85,10 +85,10 @@ impl WifiConfig {
         if let Some(path) = &self.rfkill_path {
             let state = path.join("state");
             if dry_run {
-                debug!("DRY-RUN: would write '0' to {}", state.display());
+                debug!("DRY-RUN: would write '1' to {}", state.display());
                 return;
             }
-            let _ = fs::write(&state, "0");
+            let _ = fs::write(&state, "1");
             debug!("WiFi: unblocked via {}", state.display());
         } else {
             warn!("WiFi toggling enabled but no rfkill path provided");
@@ -122,10 +122,10 @@ impl BTConfig {
         if let Some(path) = &self.rfkill_path {
             let state = path.join("state");
             if dry_run {
-                debug!("DRY-RUN: would write '1' to {}", state.display());
+                debug!("DRY-RUN: would write '0' to {}", state.display());
                 return;
             }
-            let _ = fs::write(&state, "1");
+            let _ = fs::write(&state, "0");
             debug!("BT: blocked via {}", state.display());
         } else {
             warn!("BT toggling enabled but no rfkill path provided");
@@ -139,10 +139,10 @@ impl BTConfig {
         if let Some(path) = &self.rfkill_path {
             let state = path.join("state");
             if dry_run {
-                debug!("DRY-RUN: would write '0' to {}", state.display());
+                debug!("DRY-RUN: would write '1' to {}", state.display());
                 return;
             }
-            let _ = fs::write(&state, "0");
+            let _ = fs::write(&state, "1");
             debug!("BT: unblocked via {}", state.display());
         } else {
             warn!("BT toggling enabled but no rfkill path provided");
