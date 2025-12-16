@@ -5,7 +5,7 @@ use crate::{BTConfig, CpuFreqConfig, WifiConfig};
 use log::{debug, info, warn};
 use std::fs;
 
-fn toggle_display(dry_run: bool) -> Result<(), String> {
+fn set_display_on(dry_run: bool) -> Result<(), String> {
     let backlight_path = match backlight::find_backlight() {
         Ok(Some(p)) => p,
         Ok(None) => return Err("backlight not found".to_string()),
@@ -15,40 +15,66 @@ fn toggle_display(dry_run: bool) -> Result<(), String> {
     let framebuffer_path = framebuffer::find_framebuffer().ok().flatten();
     let drm_path = drm_panel::find_drm_panel().ok().flatten();
 
+    info!("Turning display ON");
+    if !dry_run {
+        if let Some(fb) = framebuffer_path {
+            let _ = fs::write(fb.join("blank"), "0");
+        }
+        let _ = fs::write(backlight_path.join("bl_power"), "0");
+        if let Some(drm) = drm_path {
+            let _ = fs::write(drm.join("status"), "detect");
+        }
+    } else {
+        debug!("DRY-RUN: display ON skipped");
+    }
+    Ok(())
+}
+
+fn set_display_off(dry_run: bool) -> Result<(), String> {
+    let backlight_path = match backlight::find_backlight() {
+        Ok(Some(p)) => p,
+        Ok(None) => return Err("backlight not found".to_string()),
+        Err(e) => return Err(format!("failed to find backlight: {}", e)),
+    };
+
+    let framebuffer_path = framebuffer::find_framebuffer().ok().flatten();
+    let drm_path = drm_panel::find_drm_panel().ok().flatten();
+
+    info!("Turning display OFF");
+    if !dry_run {
+        if let Some(drm) = drm_path {
+            let _ = fs::write(drm.join("status"), "off");
+        }
+        if let Some(fb) = framebuffer_path {
+            let _ = fs::write(fb.join("blank"), "1");
+        }
+        let _ = fs::write(backlight_path.join("bl_power"), "4");
+    } else {
+        debug!("DRY-RUN: display OFF skipped");
+    }
+    Ok(())
+}
+
+#[allow(dead_code)]
+/// Toggle display based on current hardware state
+fn toggle_display(dry_run: bool) -> Result<(), String> {
+    let backlight_path = match backlight::find_backlight() {
+        Ok(Some(p)) => p,
+        Ok(None) => return Err("backlight not found".to_string()),
+        Err(e) => return Err(format!("failed to find backlight: {}", e)),
+    };
+
     let bl_state =
         fs::read_to_string(backlight_path.join("bl_power")).unwrap_or_else(|_| "4".to_string());
     let bl_state_trim = bl_state.trim();
 
     if bl_state_trim == "4" {
-        // ON
-        info!("Turning display ON");
-        if !dry_run {
-            if let Some(fb) = framebuffer_path {
-                let _ = fs::write(fb.join("blank"), "0");
-            }
-            let _ = fs::write(backlight_path.join("bl_power"), "0");
-            if let Some(drm) = drm_path {
-                let _ = fs::write(drm.join("status"), "detect");
-            }
-        } else {
-            debug!("DRY-RUN: toggle_display ON skipped");
-        }
+        // Currently reports ON -> ensure it's ON
+        set_display_on(dry_run)
     } else {
-        // OFF
-        info!("Turning display OFF");
-        if !dry_run {
-            if let Some(drm) = drm_path {
-                let _ = fs::write(drm.join("status"), "off");
-            }
-            if let Some(fb) = framebuffer_path {
-                let _ = fs::write(fb.join("blank"), "1");
-            }
-            let _ = fs::write(backlight_path.join("bl_power"), "4");
-        } else {
-            debug!("DRY-RUN: toggle_display OFF skipped");
-        }
+        // Currently reports OFF -> ensure it's OFF
+        set_display_off(dry_run)
     }
-    Ok(())
 }
 
 /// Power saving mode state
@@ -65,8 +91,8 @@ pub fn enter_saving_mode(
     bt: Option<&BTConfig>,
 ) {
     info!("Entering power-saving mode");
-    if let Err(e) = toggle_display(dry_run) {
-        warn!("toggle_display failed: {}", e);
+    if let Err(e) = set_display_off(dry_run) {
+        warn!("set_display_off failed: {}", e);
     }
     cpu_config.apply_saving_mode(dry_run);
     if let Some(w) = wifi {
@@ -86,8 +112,8 @@ pub fn exit_saving_mode(
 ) {
     info!("Exiting power-saving mode");
     cpu_config.apply_normal_mode(dry_run);
-    if let Err(e) = toggle_display(dry_run) {
-        warn!("toggle_display failed: {}", e);
+    if let Err(e) = set_display_on(dry_run) {
+        warn!("set_display_on failed: {}", e);
     }
     if let Some(w) = wifi {
         w.unblock(dry_run);
