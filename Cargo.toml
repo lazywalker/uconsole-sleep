@@ -14,7 +14,7 @@ codegen-units = 1
 strip = true
 
 [dependencies]
-nix = { version = "0.30", features = ["inotify", "event"] }
+nix = { version = "0.31", features = ["inotify", "event"] }
 libc = "0.2"
 log = "0.4"
 env_logger = { version = "0.11", default-features = false }
