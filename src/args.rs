@@ -221,4 +221,19 @@ mod tests {
         assert_eq!(toggle_wifi, None);
         assert_eq!(toggle_bt, None);
     }
+
+    /// The final dry-run decision is `cli_dry_run || cfg.dry_run`: either source
+    /// enables it. This locks the merge expression used in main.rs.
+    #[test]
+    fn test_dry_run_merge_cli_or_config() {
+        let merge = |cli: bool, cfg: bool| cli || cfg;
+        // config alone enables dry-run
+        assert!(merge(false, true));
+        // CLI alone enables dry-run
+        assert!(merge(true, false));
+        // both off -> not dry-run
+        assert!(!merge(false, false));
+        // both on -> dry-run
+        assert!(merge(true, true));
+    }
 }

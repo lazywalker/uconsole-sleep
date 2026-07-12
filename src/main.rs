@@ -194,6 +194,9 @@ fn main() {
     let cfg_bt_rfkill_str = opt_to_str(&cfg.bt_rfkill_path);
 
     debug!("cli.dry_run={}", dry_run);
+    // CLI --dry-run and config/env DRY_RUN are OR'd: either source enables dry-run.
+    // (--dry-run is a valueless flag, so there's no "explicit false" to preserve.)
+    let dry_run = dry_run || cfg.dry_run;
     debug!("cli.policy_path={}", cli_policy_str);
     debug!("cli.config_path={}", cli_config_str);
     debug!("cli.toggle_wifi={:?}", toggle_wifi_flag);
@@ -202,6 +205,7 @@ fn main() {
     debug!("cli.bt_rfkill={}", bt_rfkill_cli_str);
 
     debug!("cfg.dry_run={}", cfg.dry_run);
+    debug!("final.dry_run={}", dry_run);
     debug!("cfg.policy_path={}", cfg_policy_str);
     debug!("cfg.saving_cpu_freq={:?}", cfg.saving_cpu_freq);
     debug!("cfg.hold_trigger_sec={:?}", cfg.hold_trigger_sec);
