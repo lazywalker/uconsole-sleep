@@ -153,4 +153,116 @@ mod tests {
         // exit - verify it doesn't panic
         exit_saving_mode(&cpu, false, None, None);
     }
+
+    /// Unique temp dir helper scoped to a test by name, so tests don't collide.
+    fn tmp_dir(name: &str) -> std::path::PathBuf {
+        let ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis();
+        let dir = env::temp_dir().join(format!("uconsole_{name}_{ms}"));
+        let _ = fs::create_dir_all(&dir);
+        dir
+    }
+
+    /// Drive `enter_saving_mode` / `exit_saving_mode` against cpu + wifi + bt backed by
+    /// temp directories and assert each subsystem's final on-disk state. This verifies
+    /// the orchestration without depending on real sysfs display paths.
+    #[test]
+    fn test_enter_exit_full_state_cpu_wifi_bt() {
+        // CPU policy dir: seed the *default* values so exit_saving_mode can restore them.
+        let cpu_dir = tmp_dir("pm_cpu");
+        fs::write(cpu_dir.join("scaling_min_freq"), "600000\n").unwrap();
+        fs::write(cpu_dir.join("scaling_max_freq"), "1800000\n").unwrap();
+        let cpu = CpuFreqConfig::with_policy_path(cpu_dir.clone(), Some(String::from("100,600")));
+
+        // WiFi and BT rfkill dirs backed by a writable "state" file.
+        let wifi_dir = tmp_dir("pm_wifi");
+        let bt_dir = tmp_dir("pm_bt");
+        // default (unblocked) state
+        fs::write(wifi_dir.join("state"), "1").unwrap();
+        fs::write(bt_dir.join("state"), "1").unwrap();
+        let wifi = WifiConfig::new(true, Some(wifi_dir.clone()));
+        let bt = BTConfig::new(true, Some(bt_dir.clone()));
+
+        // --- enter saving mode ---
+        enter_saving_mode(&cpu, false, Some(&wifi), Some(&bt));
+
+        // CPU clamped to saving range
+        assert_eq!(
+            fs::read_to_string(cpu_dir.join("scaling_min_freq")).unwrap(),
+            "100000"
+        );
+        assert_eq!(
+            fs::read_to_string(cpu_dir.join("scaling_max_freq")).unwrap(),
+            "600000"
+        );
+        // WiFi and BT blocked
+        assert_eq!(fs::read_to_string(wifi_dir.join("state")).unwrap(), "0");
+        assert_eq!(fs::read_to_string(bt_dir.join("state")).unwrap(), "0");
+
+        // --- exit saving mode ---
+        exit_saving_mode(&cpu, false, Some(&wifi), Some(&bt));
+
+        // CPU restored to the defaults seeded above
+        assert_eq!(
+            fs::read_to_string(cpu_dir.join("scaling_min_freq"))
+                .unwrap()
+                .trim(),
+            "600000"
+        );
+        assert_eq!(
+            fs::read_to_string(cpu_dir.join("scaling_max_freq"))
+                .unwrap()
+                .trim(),
+            "1800000"
+        );
+        // WiFi and BT unblocked
+        assert_eq!(fs::read_to_string(wifi_dir.join("state")).unwrap(), "1");
+        assert_eq!(fs::read_to_string(bt_dir.join("state")).unwrap(), "1");
+    }
+
+    /// With wifi/bt enabled but no rfkill path, enter/exit must not panic and CPU still
+    /// transitions (the missing rfkill only produces a warning at runtime).
+    #[test]
+    fn test_enter_exit_with_disabled_rf() {
+        let cpu_dir = tmp_dir("pm_norf");
+        fs::write(cpu_dir.join("scaling_min_freq"), "400000\n").unwrap();
+        fs::write(cpu_dir.join("scaling_max_freq"), "1400000\n").unwrap();
+        let cpu = CpuFreqConfig::with_policy_path(cpu_dir.clone(), Some(String::from("100,400")));
+        // rfkill disabled: no path
+        let wifi = WifiConfig::new(false, None);
+        let bt = BTConfig::new(false, None);
+
+        enter_saving_mode(&cpu, false, Some(&wifi), Some(&bt));
+        assert_eq!(
+            fs::read_to_string(cpu_dir.join("scaling_max_freq")).unwrap(),
+            "400000"
+        );
+        exit_saving_mode(&cpu, false, Some(&wifi), Some(&bt));
+        assert_eq!(
+            fs::read_to_string(cpu_dir.join("scaling_max_freq"))
+                .unwrap()
+                .trim(),
+            "1400000"
+        );
+    }
+
+    /// Dry-run must leave every subsystem untouched: no CPU writes, no rfkill writes.
+    #[test]
+    fn test_dry_run_writes_nothing() {
+        let cpu_dir = tmp_dir("pm_dry");
+        let cpu = CpuFreqConfig::with_policy_path(cpu_dir.clone(), Some(String::from("100,400")));
+        let wifi_dir = tmp_dir("pm_dry_wifi");
+        let bt_dir = tmp_dir("pm_dry_bt");
+        fs::write(wifi_dir.join("state"), "1").unwrap();
+        fs::write(bt_dir.join("state"), "1").unwrap();
+        let wifi = WifiConfig::new(true, Some(wifi_dir.clone()));
+        let bt = BTConfig::new(true, Some(bt_dir.clone()));
+
+        enter_saving_mode(&cpu, true, Some(&wifi), Some(&bt));
+        assert!(!cpu_dir.join("scaling_min_freq").exists());
+        assert_eq!(fs::read_to_string(wifi_dir.join("state")).unwrap(), "1");
+        assert_eq!(fs::read_to_string(bt_dir.join("state")).unwrap(), "1");
+    }
 }

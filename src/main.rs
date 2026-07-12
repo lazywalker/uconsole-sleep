@@ -27,6 +27,79 @@ use uconsole_sleep::power_mode::{PowerMode, enter_saving_mode, exit_saving_mode}
 // EVIOCGRAB ioctl to grab exclusive access to input device
 const EVIOCGRAB: u64 = 0x40044590;
 
+// input_event classification constants
+const EV_KEY: u16 = 1;
+const KEY_POWER: u16 = 116;
+
+/// Outcome of classifying a single input_event for the power key.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum KeyDecision {
+    /// Power key was released after a press shorter than the hold threshold.
+    ShortPress,
+    /// Power key was released after a press at/longer than the hold threshold.
+    LongPress,
+    /// Event is not actionable yet (key-down, auto-repeat, non-power key, orphan key-up).
+    Continue,
+}
+
+/// Result of classifying an event: the decision plus the timestamp state to carry forward.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct KeyEventResult {
+    pub decision: KeyDecision,
+    /// New value for `last_key_down_timestamp` after this event.
+    pub last_key_down: Option<Instant>,
+}
+
+/// Pure classification of a raw input_event into a power-key decision.
+///
+/// `now` is passed in (rather than read from the clock) so the logic is deterministic and
+/// unit-testable. This mirrors the inline logic that previously lived in the event loop:
+/// a key-down (value 1) records the press time; a key-up (value 0) resolves to a short or
+/// long press based on the elapsed time since the last key-down.
+fn classify_key_event(
+    last_key_down: Option<Instant>,
+    etype: u16,
+    code: u16,
+    value: i32,
+    hold_trigger: Duration,
+    now: Instant,
+) -> KeyEventResult {
+    // Ignore everything that isn't the power key.
+    if etype != EV_KEY || code != KEY_POWER {
+        return KeyEventResult {
+            decision: KeyDecision::Continue,
+            last_key_down,
+        };
+    }
+    match value {
+        // key-down: remember when the press started
+        1 => KeyEventResult {
+            decision: KeyDecision::Continue,
+            last_key_down: Some(now),
+        },
+        // key-up: resolve short vs. long press and clear the press time
+        0 => {
+            let decision = match last_key_down {
+                Some(down_ts) if now.duration_since(down_ts) < hold_trigger => {
+                    KeyDecision::ShortPress
+                }
+                Some(_) => KeyDecision::LongPress,
+                // No preceding key-down (e.g. missed event): don't trigger a toggle.
+                None => KeyDecision::Continue,
+            };
+            KeyEventResult {
+                decision,
+                last_key_down: None,
+            }
+        }
+        // auto-repeat (value 2) or anything else: no state change
+        _ => KeyEventResult {
+            decision: KeyDecision::Continue,
+            last_key_down,
+        },
+    }
+}
+
 // Use PowerMode and enter/exit functions from the library `power_mode` module.
 
 fn resolve_log_level(
@@ -225,56 +298,54 @@ fn main() {
                                     sec, usec, etype, code, value
                                 );
 
-                                // KEY_POWER is 116
-                                if etype == 1 && code == 116 {
-                                    if value == 1 {
-                                        info!("Power key down detected");
-                                        last_key_down_timestamp = Some(Instant::now());
-                                    } else if value == 0 {
-                                        info!("Power key up detected");
-                                        if let Some(down_ts) = last_key_down_timestamp {
-                                            let elapsed = down_ts.elapsed();
-                                            if elapsed < hold_trigger {
-                                                // short press -> toggle power mode
-                                                let mode_clone = Arc::clone(&power_mode);
-                                                let cpu_config_clone = cpu_config.clone();
-                                                let dry_run_clone = dry_run;
-                                                /* no logger clone needed, using log macros */
-                                                let wifi_config_clone = wifi_config.clone();
-                                                let bt_config_clone = bt_config.clone();
+                                let now = Instant::now();
+                                let result = classify_key_event(
+                                    last_key_down_timestamp,
+                                    etype,
+                                    code,
+                                    value,
+                                    hold_trigger,
+                                    now,
+                                );
+                                last_key_down_timestamp = result.last_key_down;
 
-                                                spawn(move || {
-                                                    let mut mode = mode_clone.lock().unwrap();
-                                                    // read dry-run from env variable to avoid adding a global flag variable
-                                                    // `dry_run_clone` is passed in earlier from outer scope
-                                                    match *mode {
-                                                        PowerMode::Normal => {
-                                                            enter_saving_mode(
-                                                                &cpu_config_clone,
-                                                                dry_run_clone,
-                                                                Some(&wifi_config_clone),
-                                                                Some(&bt_config_clone),
-                                                            );
-                                                            *mode = PowerMode::Saving;
-                                                        }
-                                                        PowerMode::Saving => {
-                                                            exit_saving_mode(
-                                                                &cpu_config_clone,
-                                                                dry_run_clone,
-                                                                Some(&wifi_config_clone),
-                                                                Some(&bt_config_clone),
-                                                            );
-                                                            *mode = PowerMode::Normal;
-                                                        }
-                                                    }
-                                                });
-                                            } else {
-                                                info!(
-                                                    "Long press detected (no action implemented)",
-                                                );
+                                match result.decision {
+                                    KeyDecision::Continue => {}
+                                    KeyDecision::ShortPress => {
+                                        info!("Power key short press: toggling power mode");
+                                        // short press -> toggle power mode
+                                        let mode_clone = Arc::clone(&power_mode);
+                                        let cpu_config_clone = cpu_config.clone();
+                                        let dry_run_clone = dry_run;
+                                        let wifi_config_clone = wifi_config.clone();
+                                        let bt_config_clone = bt_config.clone();
+
+                                        spawn(move || {
+                                            let mut mode = mode_clone.lock().unwrap();
+                                            match *mode {
+                                                PowerMode::Normal => {
+                                                    enter_saving_mode(
+                                                        &cpu_config_clone,
+                                                        dry_run_clone,
+                                                        Some(&wifi_config_clone),
+                                                        Some(&bt_config_clone),
+                                                    );
+                                                    *mode = PowerMode::Saving;
+                                                }
+                                                PowerMode::Saving => {
+                                                    exit_saving_mode(
+                                                        &cpu_config_clone,
+                                                        dry_run_clone,
+                                                        Some(&wifi_config_clone),
+                                                        Some(&bt_config_clone),
+                                                    );
+                                                    *mode = PowerMode::Normal;
+                                                }
                                             }
-                                        }
-                                        last_key_down_timestamp = None;
+                                        });
+                                    }
+                                    KeyDecision::LongPress => {
+                                        info!("Long press detected (no action implemented)");
                                     }
                                 }
                             }
@@ -315,5 +386,91 @@ mod tests {
     fn resolve_config_when_no_env_no_verbosity() {
         let resolved = resolve_log_level(None, 0, Some(Level::Warn));
         assert_eq!(resolved, Some(LevelFilter::Warn));
+    }
+
+    // ---- classify_key_event: short/long press detection ----
+
+    const HOLD: Duration = Duration::from_millis(700);
+
+    #[test]
+    fn classify_non_power_key_is_ignored() {
+        let now = Instant::now();
+        // A keyboard event (e.g. 'A' key) must not be treated as a power key.
+        let r = classify_key_event(None, EV_KEY, 30, 1, HOLD, now);
+        assert_eq!(r.decision, KeyDecision::Continue);
+        assert_eq!(r.last_key_down, None);
+    }
+
+    #[test]
+    fn classify_non_ev_key_type_is_ignored() {
+        let now = Instant::now();
+        // Synchronization events (type 0) on the power device must be ignored.
+        let r = classify_key_event(None, 0, KEY_POWER, 0, HOLD, now);
+        assert_eq!(r.decision, KeyDecision::Continue);
+        assert_eq!(r.last_key_down, None);
+    }
+
+    #[test]
+    fn classify_key_down_records_timestamp() {
+        let now = Instant::now();
+        let r = classify_key_event(None, EV_KEY, KEY_POWER, 1, HOLD, now);
+        assert_eq!(r.decision, KeyDecision::Continue);
+        assert_eq!(r.last_key_down, Some(now));
+    }
+
+    #[test]
+    fn classify_short_press_when_elapsed_below_threshold() {
+        // key-down happened 100ms ago; threshold is 700ms -> short press.
+        let now = Instant::now();
+        let down = now - Duration::from_millis(100);
+        let r = classify_key_event(Some(down), EV_KEY, KEY_POWER, 0, HOLD, now);
+        assert_eq!(r.decision, KeyDecision::ShortPress);
+        assert_eq!(r.last_key_down, None);
+    }
+
+    #[test]
+    fn classify_long_press_when_elapsed_at_or_above_threshold() {
+        // key-down happened 800ms ago; threshold is 700ms -> long press.
+        let now = Instant::now();
+        let down = now - Duration::from_millis(800);
+        let r = classify_key_event(Some(down), EV_KEY, KEY_POWER, 0, HOLD, now);
+        assert_eq!(r.decision, KeyDecision::LongPress);
+        assert_eq!(r.last_key_down, None);
+    }
+
+    #[test]
+    fn classify_key_up_without_prior_down_is_ignored() {
+        // An orphan key-up (no preceding key-down) must NOT toggle power mode.
+        let now = Instant::now();
+        let r = classify_key_event(None, EV_KEY, KEY_POWER, 0, HOLD, now);
+        assert_eq!(r.decision, KeyDecision::Continue);
+        assert_eq!(r.last_key_down, None);
+    }
+
+    #[test]
+    fn classify_auto_repeat_value_does_not_toggle() {
+        // The kernel reports value 2 for auto-repeat; it must be a no-op.
+        let now = Instant::now();
+        let down = now - Duration::from_millis(100);
+        let r = classify_key_event(Some(down), EV_KEY, KEY_POWER, 2, HOLD, now);
+        assert_eq!(r.decision, KeyDecision::Continue);
+        // auto-repeat must not clear the recorded key-down time
+        assert_eq!(r.last_key_down, Some(down));
+    }
+
+    #[test]
+    fn classify_boundary_just_below_and_at_threshold() {
+        // elapsed == 699ms -> short, elapsed == 700ms -> long (decision is `<`, not `<=`)
+        let now = Instant::now();
+        let short_down = now - Duration::from_millis(699);
+        assert_eq!(
+            classify_key_event(Some(short_down), EV_KEY, KEY_POWER, 0, HOLD, now).decision,
+            KeyDecision::ShortPress
+        );
+        let boundary_down = now - HOLD;
+        assert_eq!(
+            classify_key_event(Some(boundary_down), EV_KEY, KEY_POWER, 0, HOLD, now).decision,
+            KeyDecision::LongPress
+        );
     }
 }

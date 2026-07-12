@@ -188,4 +188,37 @@ mod tests {
             parse_cli_args_from(args);
         assert_eq!(verbosity, 3);
     }
+
+    /// `--toggle-wifi` with `=VALUE` must normalize false-y values to false.
+    #[test]
+    fn test_toggle_wifi_eq_false_variants() {
+        for val in ["false", "0", "no"] {
+            let args = vec![String::from("prog"), format!("--toggle-wifi={val}")];
+            let (_dry, _verb, toggle_wifi, _toggle_bt, _cfg) = parse_cli_args_from(args);
+            assert_eq!(
+                toggle_wifi,
+                Some(false),
+                "value '{val}' should parse to false"
+            );
+        }
+    }
+
+    /// `--toggle-bt` with `=VALUE` must normalize truthy values to true.
+    #[test]
+    fn test_toggle_bt_eq_true_variants() {
+        for val in ["true", "1", "yes"] {
+            let args = vec![String::from("prog"), format!("--toggle-bt={val}")];
+            let (_dry, _verb, _toggle_wifi, toggle_bt, _cfg) = parse_cli_args_from(args);
+            assert_eq!(toggle_bt, Some(true), "value '{val}' should parse to true");
+        }
+    }
+
+    /// When no toggle flags are given, both stay None so config-file values apply.
+    #[test]
+    fn test_toggle_flags_absent_yield_none() {
+        let args = vec![String::from("prog")];
+        let (_dry, _verb, toggle_wifi, toggle_bt, _cfg) = parse_cli_args_from(args);
+        assert_eq!(toggle_wifi, None);
+        assert_eq!(toggle_bt, None);
+    }
 }

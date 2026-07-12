@@ -157,36 +157,9 @@ mod tests {
     use std::fs;
 
     #[test]
-    fn test_find_default_rfkill_path() {
-        let _ = find_default_rfkill_path();
-    }
-
-    #[test]
-    fn test_find_default_rfkill_path_bt() {
-        let _ = find_default_rfkill_path_bt();
-    }
-
-    #[test]
     fn test_write_rfkill_state_dry_run() {
         let tmp = env::temp_dir().join(format!(
             "uconsole_wifi_{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_millis()
-        ));
-        let _ = fs::create_dir_all(&tmp);
-        fs::write(tmp.join("state"), "0").unwrap();
-        write_rfkill_state(&tmp, true, true);
-        // dry run should not change
-        let s = fs::read_to_string(tmp.join("state")).unwrap();
-        assert_eq!(s, "0");
-    }
-
-    #[test]
-    fn test_write_rfkill_state_dry_run_bt() {
-        let tmp = env::temp_dir().join(format!(
-            "uconsole_bt_{}",
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()

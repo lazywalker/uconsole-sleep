@@ -116,4 +116,65 @@ mod tests {
         assert_eq!(min2.trim(), "100000");
         assert_eq!(max2.trim(), "400000");
     }
+
+    /// A malformed SAVING_CPU_FREQ (missing comma) must not panic: saving_min/max stay None
+    /// and apply_saving_mode is a no-op rather than writing garbage.
+    #[test]
+    fn test_cpu_malformed_freq_is_noop() {
+        let tmp = env::temp_dir().join(format!(
+            "uconsole_cpu_malformed_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis()
+        ));
+        let _ = fs::create_dir_all(&tmp);
+        // seed defaults so the config can read them back
+        fs::write(tmp.join("scaling_min_freq"), "400000\n").unwrap();
+        fs::write(tmp.join("scaling_max_freq"), "1400000\n").unwrap();
+
+        // no comma -> not two parts -> saving range is None
+        let cpu = CpuFreqConfig::with_policy_path(tmp.clone(), Some(String::from("100")));
+        assert!(cpu.saving_min.is_none());
+        assert!(cpu.saving_max.is_none());
+
+        // apply_saving_mode must not overwrite the seeded defaults
+        cpu.apply_saving_mode(false);
+        assert_eq!(
+            fs::read_to_string(tmp.join("scaling_min_freq"))
+                .unwrap()
+                .trim(),
+            "400000"
+        );
+        assert_eq!(
+            fs::read_to_string(tmp.join("scaling_max_freq"))
+                .unwrap()
+                .trim(),
+            "1400000"
+        );
+    }
+
+    /// Whitespace inside the value ("100, 400") is tolerated via trim().
+    #[test]
+    fn test_cpu_freq_parsing_trims_whitespace() {
+        let tmp = env::temp_dir().join(format!(
+            "uconsole_sleep_test_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis()
+        ));
+        let _ = fs::create_dir_all(&tmp);
+        let cpu = CpuFreqConfig::with_policy_path(tmp.clone(), Some(String::from(" 100 , 400 ")));
+        cpu.apply_saving_mode(false);
+        assert_eq!(
+            fs::read_to_string(tmp.join("scaling_min_freq")).unwrap(),
+            "100000"
+        );
+        assert_eq!(
+            fs::read_to_string(tmp.join("scaling_max_freq")).unwrap(),
+            "400000"
+        );
+    }
 }

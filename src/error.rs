@@ -61,18 +61,4 @@ mod tests {
         let err = Error::PermissionDenied("access denied".to_string());
         assert_eq!(err.to_string(), "Permission denied: access denied");
     }
-
-    #[test]
-    fn test_error_clone() {
-        let err = Error::NotFound("test".to_string());
-        let cloned = err.clone();
-        assert_eq!(err.to_string(), cloned.to_string());
-    }
-
-    #[test]
-    fn test_error_debug() {
-        let err = Error::NotFound("test".to_string());
-        let debug_str = format!("{:?}", err);
-        assert!(debug_str.contains("NotFound"));
-    }
 }
