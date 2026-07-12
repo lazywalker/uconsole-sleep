@@ -16,6 +16,3 @@ AmbientCapabilities=CAP_SYS_ADMIN
 
 [Install]
 WantedBy=multi-user.target
-[Unit]
-Description=Sleep Remap PowerKey
-After=basic.target
